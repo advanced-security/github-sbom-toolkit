@@ -35,9 +35,11 @@ export function createOctokit({ token, baseUrl, userAgentExtra }: OctokitFactory
         console.error(`Rate limit exceeded for ${opt.method} ${opt.url}. Not retrying.`);
         return false;
       },
-      onSecondaryRateLimit: (retryAfter: number, options: unknown) => {
+      onSecondaryRateLimit: async (retryAfter: number, options: unknown) => {
         const opt = options as { method?: string; url?: string };
         console.warn(`Secondary rate limit detected for ${opt.method} ${opt.url}. Pausing for ${retryAfter}s.`);
+        // do the pause of N seconds
+        await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
         return true;
       }
     }

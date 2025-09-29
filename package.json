@@ -1,11 +1,11 @@
 {
-  "name": "gh-sbom-collector",
+  "name": "github-sbom-toolkit",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "CLI tool to collect all repository SBOMs for a GitHub Enterprise or Organization and enable interactive dependency PURL search.",
+  "description": "CLI tool to collect all repository SBOMs for a GitHub Enterprise or Organization and enable interactive dependency PURL search or matching to malware advisories.",
   "bin": {
-    "gh-sbom-collector": "dist/cli.js"
+    "github-sbom-toolkit": "dist/cli.js"
   },
   "scripts": {
     "build": "tsc --project tsconfig.json",

@@ -183,10 +183,7 @@ export class SbomCollector {
 
     const fullName = `${org}/${repo}`;
     try {
-      // Ensure dependency graph is enabled before requesting SBOM (optional)
-      if (this.opts.autoEnableDependencyGraph) {
-        await this.ensureDependencyGraphEnabled(org, repo);
-      }
+      // TODO: Ensure dependency graph is enabled before requesting SBOM
       const resp = await this.octokit.request("GET /repos/{owner}/{repo}/dependency-graph/sbom", { owner: org, repo, headers: { Accept: "application/vnd.github+json" } });
       const sbomWrapper = resp.data as { sbom?: Sbom };
       const packages: SbomPackage[] = sbomWrapper?.sbom?.packages ?? [];
@@ -245,28 +242,5 @@ export class SbomCollector {
       if (matches.size) results.set(s.repo, Array.from(matches));
     }
     return results;
-  }
-
-  private async ensureDependencyGraphEnabled(owner: string, repo: string): Promise<boolean> {
-    if (!this.octokit) return false;
-    try {
-      const r = await this.octokit.request("GET /repos/{owner}/{repo}", { owner, repo, headers: { Accept: "application/vnd.github+json" } });
-      interface SecAnalysisStatus { status?: string }
-      interface SecurityAndAnalysis {
-        dependency_graph?: SecAnalysisStatus; // Not yet in official types
-        [k: string]: unknown;
-      }
-      const saWrap = r.data as { security_and_analysis?: SecurityAndAnalysis };
-      const dgStatus = saWrap.security_and_analysis?.dependency_graph?.status;
-      if (dgStatus === "enabled") return true;
-      // Attempt to enable if possible
-      console.warn(`Dependency graph is ${dgStatus || "disabled"} for ${owner}/${repo}`);
-      // TODO: enable using Security Configurations API?
-      return false;
-    } catch (e) {
-      // eslint-disable-next-line no-console
-      console.warn(`Failed to check dependency graph status for ${owner}/${repo}: ${e instanceof Error ? e.message : String(e)}`);
-      return false;
-    }
   }
 }
