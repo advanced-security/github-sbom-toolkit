@@ -1,0 +1,44 @@
+{
+  "name": "gh-sbom-collector",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "CLI tool to collect all repository SBOMs for a GitHub Enterprise or Organization and enable interactive dependency PURL search.",
+  "bin": {
+    "gh-sbom-collector": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "start": "node dist/cli.js",
+    "dev": "tsx src/cli.ts",
+    "lint": "eslint . --ext .ts --max-warnings=0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@octokit/core": "^7.0.4",
+    "@octokit/graphql": "^9.0.1",
+    "@octokit/plugin-paginate-rest": "^13.1.1",
+    "@octokit/plugin-rest-endpoint-methods": "^16.1.0",
+    "@octokit/plugin-retry": "^8.0.1",
+    "@octokit/plugin-throttling": "^11.0.1",
+    "chalk": "^5.6.2",
+    "inquirer": "^12.9.6",
+    "p-limit": "^7.1.1",
+    "packageurl-js": "^2.0.1",
+    "semver": "^7.7.2",
+    "yargs": "^18.0.0"
+  },
+  "devDependencies": {
+    "@types/inquirer": "^9.0.9",
+    "@types/node": "^20.11.30",
+    "@types/semver": "^7.7.1",
+    "@types/yargs": "^17.0.33",
+    "@typescript-eslint/eslint-plugin": "^7.2.0",
+    "@typescript-eslint/parser": "^7.2.0",
+    "eslint": "^8.57.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.2"
+  }
+}
