@@ -17,16 +17,16 @@ async function main() {
     .option("concurrency", { type: "number", default: 5 })
     .option("delay", { type: "number", default: 0, describe: "Delay milliseconds between repository SBOM requests" })
     .option("out", { type: "string", describe: "Directory to serialize SBOM JSON files" })
-  .option("purl", { type: "array", describe: "One or more PURL strings to search (supports suffix * wildcard after slash)" })
-  .option("load", { type: "string", describe: "Directory of previously serialized SBOM JSON files to load instead of fetching" })
-  .option("interactive", { type: "boolean", default: false, describe: "Enter interactive PURL search mode after collection" })
-  .option("sync-malware", { type: "boolean", default: false, describe: "Sync malware advisories (MALWARE classification) to local cache" })
-  .option("malware-cache", { type: "string", default: "malware-cache", describe: "Directory to store malware advisory cache" })
-  .option("malware-since", { type: "string", describe: "Override last sync timestamp (ISO) for malware advisory incremental sync" })
-  .option("match-malware", { type: "boolean", default: false, describe: "After sync/load, match SBOM packages against malware advisories" })
-  .option("malware-report", { type: "string", describe: "If set, write malware match results (JSON array) to this file when --match-malware is used" })
-  .option("incremental", { type: "boolean", default: false, describe: "Skip SBOM fetch for repos whose pushed_at has not advanced vs baseline" })
-  .option("baseline", { type: "string", describe: "Directory of prior SBOM JSON files used as baseline for --incremental" })
+    .option("purl", { type: "array", describe: "One or more PURL strings to search (supports suffix * wildcard after slash)" })
+    .option("load", { type: "string", describe: "Directory of previously serialized SBOM JSON files to load instead of fetching" })
+    .option("interactive", { type: "boolean", default: false, describe: "Enter interactive PURL search mode after collection" })
+    .option("sync-malware", { type: "boolean", default: false, describe: "Sync malware advisories (MALWARE classification) to local cache" })
+    .option("malware-cache", { type: "string", default: "malware-cache", describe: "Directory to store malware advisory cache" })
+    .option("malware-since", { type: "string", describe: "Override last sync timestamp (ISO) for malware advisory incremental sync" })
+    .option("match-malware", { type: "boolean", default: false, describe: "After sync/load, match SBOM packages against malware advisories" })
+    .option("malware-report", { type: "string", describe: "If set, write malware match results (JSON array) to this file when --match-malware is used" })
+    .option("incremental", { type: "boolean", default: false, describe: "Skip SBOM fetch for repos whose pushed_at has not advanced vs baseline" })
+    .option("baseline", { type: "string", describe: "Directory of prior SBOM JSON files used as baseline for --incremental" })
     .check(args => {
       if (!args.load) {
         if (!args.enterprise && !args.org) throw new Error("Provide --enterprise or --org (or --load)\n");
@@ -41,8 +41,8 @@ async function main() {
 
   if (argv.sbom || argv["sync-malware"]) {
     if (!token) {
-        console.error(chalk.red("GitHub token must be provided via --token or GITHUB_TOKEN environment variable"));
-        process.exit(1);
+      console.error(chalk.red("GitHub token must be provided via --token or GITHUB_TOKEN environment variable"));
+      process.exit(1);
     }
   }
 
@@ -119,7 +119,7 @@ async function main() {
   }
 
   if (argv.interactive) {
-    for (;;) {
+    for (; ;) {
       const ans = await inquirer.prompt<{ purls: string }>([
         { name: "purls", message: "Enter comma-separated PURLs (blank to exit)", type: "input" }
       ]);

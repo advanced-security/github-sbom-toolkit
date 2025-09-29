@@ -43,7 +43,7 @@ export class SbomCollector {
     } as Required<CollectorOptions>;
 
     if (this.opts.token) {
-        this.octokit = createOctokit({ token: this.opts.token, baseUrl: this.opts.baseUrl });
+      this.octokit = createOctokit({ token: this.opts.token, baseUrl: this.opts.baseUrl });
     }
 
     this.summary = {
@@ -156,8 +156,8 @@ export class SbomCollector {
     if (!this.octokit) throw new Error("No Octokit instance");
 
     // GET /orgs/{org}/repos
-  interface RepoMeta { name: string; pushed_at?: string; updated_at?: string; default_branch?: string }
-  const repos: RepoMeta[] = [];
+    interface RepoMeta { name: string; pushed_at?: string; updated_at?: string; default_branch?: string }
+    const repos: RepoMeta[] = [];
     const per_page = 100;
     let page = 1;
     let done = false;
