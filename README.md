@@ -100,11 +100,8 @@ node dist/cli.js --org my-org --out sboms --baseline sboms --incremental
 
 Summary output will include `Skipped: <n>` showing how many repos reused the baseline SBOM.
 
-Notes:
-
-- Uses `pushed_at` from the existing org repository listing; no extra API calls.
-- A push to any branch updates `pushed_at` (may cause a fetch even if default branch unchanged).
-- Future enhancement: store ETag and use conditional requests, or fetch default branch HEAD SHA.
+- A push to any branch updates `pushed_at`, which may cause a fetch even if the default branch is unchanged
+- Future enhancement: store ETag and use conditional requests, or fetch default branch HEAD SHA
 
 ## Build
 
@@ -115,7 +112,31 @@ npm run build
 
 ## Notes
 
-- Rate limiting and secondary limits are automatically retried (up to 2 times) via Octokit throttling plugin.
+### Supplying PURL Queries from a File
+
+Provide a file containing one or more PURL (or PURL + semver range) queries, one per line. Blank lines and lines starting with `#` are ignored.
+
+Example file `queries.txt`:
+
+```text
+# Exact PURL
+pkg:npm/chalk@5.6.1
+
+# Version range (semver caret)
+pkg:npm/chalk@^5.0.0
+
+# Version range (inequalities)
+pkg:npm/chalk@>=5.0.0 <6.0.0
+
+Run with:
+
+```bash
+node dist/cli.js --load sboms --purl-file queries.txt
+```
+
+### Rate limiting
+
+- Rate limiting and secondary limits are automatically retried (up to 2 times)
 
 ## License
 

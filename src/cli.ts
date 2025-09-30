@@ -25,6 +25,7 @@ async function main() {
     .option("malware-since", { type: "string", describe: "Override last sync timestamp (ISO) for malware advisory incremental sync" })
     .option("match-malware", { type: "boolean", default: false, describe: "After sync/load, match SBOM packages against malware advisories" })
     .option("malware-report", { type: "string", describe: "If set, write malware match results (JSON array) to this file when --match-malware is used" })
+    .option("purl-file", { type: "string", describe: "Path to file with PURL queries (one per line; supports version ranges & wildcards; # or // for comments)" })
     .option("incremental", { type: "boolean", default: false, describe: "Skip SBOM fetch for repos whose pushed_at has not advanced vs baseline" })
     .option("baseline", { type: "string", describe: "Directory of prior SBOM JSON files used as baseline for --incremental" })
     .check(args => {
@@ -113,9 +114,28 @@ async function main() {
       for (const m of matches) console.log(`  - ${m}`);
     }
   };
-
-  if (argv.purl && argv.purl.length) {
-    runSearch(argv.purl as string[]);
+  // Load queries from file if provided
+  const filePurls: string[] = [];
+  if (argv["purl-file"]) {
+    try {
+      const fs = await import("fs");
+      const raw = fs.readFileSync(argv["purl-file"] as string, "utf8");
+      for (const lineRaw of raw.split(/\r?\n/)) {
+        const line = lineRaw.trim();
+        if (!line || line.startsWith("#")) continue;
+        filePurls.push(line);
+      }
+      if (filePurls.length) {
+        console.log(chalk.cyan(`Loaded ${filePurls.length} PURL query(ies) from file`));
+      }
+    } catch (e) {
+      console.error(chalk.red(`Failed to read purl file: ${e instanceof Error ? e.message : String(e)}`));
+      process.exit(1);
+    }
+  }
+  const combinedPurls = [ ...(argv.purl as string[] ?? []), ...filePurls ];
+  if (combinedPurls.length) {
+    runSearch(combinedPurls);
   }
 
   if (argv.interactive) {

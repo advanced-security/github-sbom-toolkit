@@ -1,5 +1,6 @@
 import { createOctokit } from "./octokit.js";
 import type { RepositorySbom, CollectionSummary, SbomPackage, Sbom } from "./types.js";
+import * as semver from "semver";
 import { readAll } from "./serialization.js";
 // p-limit lacks bundled types in some versions; declare minimal shape
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -216,30 +217,100 @@ export class SbomCollector {
   }
 
   searchByPurls(purls: string[]): Map<string, string[]> {
-    const normalized = purls.map(p => p.trim().toLowerCase()).filter(Boolean);
-    const results = new Map<string, string[]>(); // repo -> matched purls
-    for (const s of this.sboms) {
-      if (s.error) continue;
-      const matches = new Set<string>();
-      for (const pkg of s.packages) {
-        const refs = pkg.externalRefs as Array<{ referenceCategory: string; referenceType: string; referenceLocator: string }> | undefined;
+    interface ParsedQuery {
+      raw: string;
+      lower: string;
+      isPrefixWildcard: boolean;
+      exact?: string; // lowercase exact purl (for simple equality)
+      type?: string;
+      name?: string;
+      versionConstraint?: string; // if semver range specified
+    }
+
+    const looksLikeSemverRange = (v: string) => /[\^~><=]|\|\|/.test(v.trim());
+
+    const parseQuery = (raw: string): ParsedQuery | null => {
+      const trimmed = raw.trim();
+      if (!trimmed) return null;
+      const lower = trimmed.toLowerCase();
+      if (lower.endsWith("*")) {
+        return { raw: trimmed, lower, isPrefixWildcard: true };
+      }
+      if (lower.startsWith("pkg:")) {
+        const atIdx = trimmed.indexOf("@");
+        if (atIdx > -1) {
+          const coord = trimmed.slice(4, atIdx); // type/name
+          const verPart = trimmed.slice(atIdx + 1).trim();
+          const slashIdx = coord.indexOf("/");
+            if (slashIdx > 0) {
+              const type = coord.slice(0, slashIdx).toLowerCase();
+              const name = coord.slice(slashIdx + 1);
+              if (looksLikeSemverRange(verPart)) {
+                return { raw: trimmed, lower, isPrefixWildcard: false, type, name, versionConstraint: verPart };
+              }
+            }
+        }
+        // treat as exact purl string match
+        return { raw: trimmed, lower, isPrefixWildcard: false, exact: lower };
+      }
+      return { raw: trimmed, lower, isPrefixWildcard: false, exact: lower };
+    };
+
+    const queries: ParsedQuery[] = purls.map(parseQuery).filter((q): q is ParsedQuery => !!q);
+    const results = new Map<string, string[]>();
+
+    if (!queries.length) return results;
+
+    for (const repoSbom of this.sboms) {
+      if (repoSbom.error) continue;
+      const matched = new Set<string>();
+      // gather all purls from package externalRefs or package.purl
+      interface ExtRef { referenceType: string; referenceLocator: string }
+      for (const pkg of repoSbom.packages as Array<SbomPackage & { externalRefs?: ExtRef[] }>) {
+        const refs = pkg.externalRefs;
+        const candidatePurls: string[] = [];
         if (refs) {
-          for (const r of refs) {
-            if (r.referenceType === "purl" && r.referenceLocator) {
-              const p = r.referenceLocator.toLowerCase();
-              if (!p) continue;
-              for (const needle of normalized) {
-                if (p === needle) matches.add(p);
-                else if (needle.endsWith("*")) { // prefix wildcard
-                  const prefix = needle.slice(0, -1); // keep slash
-                  if (p.startsWith(prefix)) matches.add(p);
+          for (const r of refs) if (r.referenceType === "purl" && r.referenceLocator) candidatePurls.push(r.referenceLocator);
+        }
+  if (pkg.purl) candidatePurls.push(pkg.purl);
+        // de-dup
+        const unique = Array.from(new Set(candidatePurls));
+        for (const p of unique) {
+          const pLower = p.toLowerCase();
+          for (const q of queries) {
+            if (q.isPrefixWildcard) {
+              const prefix = q.lower.slice(0, -1); // remove *
+              if (pLower.startsWith(prefix)) matched.add(p);
+              continue;
+            }
+            if (q.versionConstraint && q.type && q.name) {
+              // parse package purl into type/name@version
+              if (!pLower.startsWith("pkg:")) continue;
+              const body = p.slice(4);
+              const atIdx = body.indexOf("@");
+              const main = atIdx >= 0 ? body.slice(0, atIdx) : body;
+              const ver = atIdx >= 0 ? body.slice(atIdx + 1) : (pkg.version as string | undefined) || undefined;
+              const slashIdx = main.indexOf("/");
+              if (slashIdx < 0) continue;
+              const pType = main.slice(0, slashIdx).toLowerCase();
+              const pName = main.slice(slashIdx + 1);
+              if (pType === q.type && pName.toLowerCase() === q.name.toLowerCase() && ver) {
+                try {
+                  const coerced = semver.coerce(ver)?.version || ver;
+                  if (semver.valid(coerced) && semver.satisfies(coerced, q.versionConstraint, { includePrerelease: true })) {
+                    matched.add(p);
+                  }
+                } catch {
+                  // ignore invalid semver
                 }
               }
+            } else if (q.exact) {
+              if (pLower === q.exact) matched.add(p);
             }
           }
         }
       }
-      if (matches.size) results.set(s.repo, Array.from(matches));
+      if (matched.size) results.set(repoSbom.repo, Array.from(matched));
     }
     return results;
   }
