@@ -12,6 +12,7 @@ Search collected SBOMs by PURL, cache them for offline analysis, sync malware se
 - Cache SBOMs in a single directory (JSON per repository) with offline re-use
 - Sync malware security advisories from the GitHub Advisory Database
 - Version-aware matching of SBOM packages vs. malware advisories
+- Optional SARIF 2.1.0 output per repository for malware matches with optional Code Scanning upload
 - Works with GitHub.com, GitHub Enterprise Server, GitHub Enterprise Managed Users and GitHub Enterprise Cloud with Data Residency (custom base URL)
 - Reason tracing: every search match shows which query matched; every malware match shows which advisory triggered it
 - Interactive REPL for ad‑hoc PURL queries (history, graceful Ctrl+C handling)
@@ -90,6 +91,30 @@ node dist/cli.js --sbom-cache sboms --malware-cache malware-cache --match-malwar
 ```
 
 If you also perform a search in the same invocation (add `--purl` or `--purl-file`), the JSON file will contain both `malwareMatches` and `search` top-level keys.
+
+### SARIF Output & Code Scanning Upload
+
+Generate SARIF 2.1.0 files (one per repository with matches) for malware findings:
+
+```bash
+node dist/cli.js --sbom-cache sboms --malware-cache malware-cache --match-malware --sarif-dir sarif-out
+```
+
+Each file is named `<owner>_<repo>.sarif` and contains rules (one per advisory GHSA) and results (one per matched package).
+
+Upload those SARIF files to GitHub Code Scanning (creates alerts in each affected repository):
+
+```bash
+node dist/cli.js --sbom-cache sboms --malware-cache malware-cache \
+  --match-malware --sarif-dir sarif-out --upload-sarif --token $GITHUB_TOKEN
+```
+
+Notes:
+
+- `--upload-sarif` requires `--sarif-dir` and `--match-malware`.
+- A token with `security_events` (and appropriate repo/org scope) is required for uploads.
+- The tool attempts to resolve the default branch commit SHA for each repo; if it cannot, that repo's upload is skipped.
+- SARIF upload merges are handled by GitHub; repeated uploads for the same commit replace earlier results for the same tool.
 
 ### Output Modes (Search Results)
 
@@ -211,12 +236,12 @@ Or (fresh sync + file-based queries):
 node dist/cli.js --sync-sboms --org my-org --sbom-cache sboms --purl-file queries.txt
 ```
 
-### Flag Overview (Common)
+### Argument Reference
 
-| Flag | Purpose |
+| Arg | Purpose |
 |------|---------|
 | `--sbom-cache <dir>` | Directory holding per-repo SBOM JSON files (required for offline mode; used as write target when syncing) |
-| `--sync-sboms` | Perform API calls to (re)collect SBOMs; without it the CLI runs offline loading cached SBOMs |
+| `--sync-sboms` | Perform API calls to (re)collect SBOMs; without it the CLI runs offline loading cached SBOMs. Requires a GitHub token |
 | `--enterprise <slug>` / `--org <login>` | Scope selection (mutually exclusive when syncing) |
 | `--baseline <dir>` | Prior SBOM directory for incremental comparison |
 | `--incremental` | Skip SBOMs whose `pushed_at` unchanged vs baseline |
@@ -226,9 +251,11 @@ node dist/cli.js --sync-sboms --org my-org --sbom-cache sboms --purl-file querie
 | `--cli` | Also emit human-readable output when producing JSON (requires `--output-file`) |
 | `--output-file <file>` | Write search JSON payload to file; required when using both `--json` and `--cli` |
 | `--interactive` | Enter interactive search prompt after initial processing |
-| `--sync-malware` | Fetch & cache malware advisories (MALWARE classification) |
+| `--sync-malware` | Fetch & cache malware advisories (MALWARE classification). Requires a GitHub token |
 | `--match-malware` | Match current SBOM set against cached advisories |
 | `--malware-cache <dir>` | Advisory cache directory (required with malware operations) |
+| `--sarif-dir <dir>` | Write SARIF 2.1.0 files per repository (with malware matches) |
+| `--upload-sarif` | Upload generated SARIF to Code Scanning (requires --match-malware & --sarif-dir and a GitHub token) |
 | `--concurrency <n>` | Parallel SBOM fetches (default 5) |
 | `--delay <ms>` | Delay between repository SBOM requests |
 | `--base-url <url>` | GitHub Enterprise Server REST base URL (ends with /api/v3) |
@@ -245,12 +272,12 @@ This makes it clear which input (user query or specific advisory) caused each re
 ### Rate Limiting & Retries
 
 - Standard & secondary rate limits automatically retried (up to 2 times)
-- You may tune concurrency and add delay where strict throttling required
+- You can tune concurrency and increase the delay to reduce the chance of hitting rate limits
 
 ### Authentication Notes
 
-- A token is only required when performing network operations (`--sync-sboms` and/or `--sync-malware`).
-- Offline operations (pure searches, matches using pre-cached data) need no token.
+- A GitHub token is required when performing network operations such as `--sync-sboms`, `--sync-malware` and `--upload-sarif`
+- Offline operations (pure searches, matches using pre-cached data) need no token
 
 ## License
 
