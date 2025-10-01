@@ -51,7 +51,7 @@ export class SbomCollector {
     } as Required<CollectorOptions>;
 
     if (this.opts.token) {
-      this.octokit = createOctokit({ token: this.opts.token, baseUrl: this.opts.baseUrl, suppressSecondaryRateLimitLogs: this.opts.suppressSecondaryRateLimitLogs });
+      this.octokit = createOctokit({ token: this.opts.token, baseUrl: this.opts.baseUrl, suppressSecondaryRateLimitLogs: this.opts.suppressSecondaryRateLimitLogs || this.opts.quiet });
     }
 
     this.summary = {
