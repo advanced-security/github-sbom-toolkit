@@ -1,7 +1,7 @@
 import { createOctokit } from "./octokit.js";
 import type { RepositorySbom, CollectionSummary, SbomPackage, Sbom } from "./types.js";
 import * as semver from "semver";
-import { readAll } from "./serialization.js";
+import { readAll, writeOne } from "./serialization.js";
 // p-limit lacks bundled types in some versions; declare minimal shape
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
@@ -19,6 +19,8 @@ export interface CollectorOptions {
   loadFromDir?: string; // optional pre-existing serialized SBOM directory
   syncSboms?: boolean; // if true, fetch SBOMs from GitHub (requires token)
   autoEnableDependencyGraph?: boolean; // attempt to enable Dependency Graph if disabled
+  showProgressBar?: boolean; // render a simple progress bar when fetching SBOMs
+  suppressSecondaryRateLimitLogs?: boolean; // suppress secondary rate limit warning logs (so they don't break the progress bar)
 }
 
 export class SbomCollector {
@@ -41,11 +43,13 @@ export class SbomCollector {
       autoEnableDependencyGraph: true,
       loadFromDir: options.loadFromDir ?? undefined,
       syncSboms: options.syncSboms ?? false,
+      showProgressBar: options.showProgressBar ?? false,
+      suppressSecondaryRateLimitLogs: options.suppressSecondaryRateLimitLogs ?? false,
       ...options
     } as Required<CollectorOptions>;
 
     if (this.opts.token) {
-      this.octokit = createOctokit({ token: this.opts.token, baseUrl: this.opts.baseUrl });
+      this.octokit = createOctokit({ token: this.opts.token, baseUrl: this.opts.baseUrl, suppressSecondaryRateLimitLogs: this.opts.suppressSecondaryRateLimitLogs });
     }
 
     this.summary = {
@@ -99,51 +103,95 @@ export class SbomCollector {
       throw new Error("No Octokit instance; token may be missing");
     }
 
+    if (this.opts.enterprise) {
+      console.log(chalk.blue(`Getting list of organizations for enterprise ${this.opts.enterprise}`));
+    }
+
     const orgs = this.opts.org ? [this.opts.org] : await this.listEnterpriseOrgs(this.opts.enterprise!);
     this.summary.orgs = orgs;
-    this.summary.repositoryCount = 0; // reset to recount
+
+    // Pre-list all repos if showing progress bar so we know the total upfront
+    const orgRepoMap: Record<string, { name: string; pushed_at?: string; updated_at?: string; default_branch?: string }[]> = {};
+    let totalRepos = 0;
+    for (const org of orgs) {
+      console.log(chalk.blue(`Listing repositories for org ${org}`));
+      const repos = await this.listOrgRepos(org);
+      orgRepoMap[org] = repos;
+      totalRepos += repos.length;
+    }
+    this.summary.repositoryCount = totalRepos;
+
+    let processed = 0;
+    let lastRender = 0;
+    const renderBar = () => {
+      if (!this.opts.showProgressBar) return;
+      const now = Date.now();
+      if (now - lastRender < 80) return; // throttle to ~12fps
+      lastRender = now;
+      const width = 30;
+      const ratio = totalRepos === 0 ? 0 : processed / totalRepos;
+      const filled = Math.round(ratio * width);
+      const bar = `[${"#".repeat(filled).padEnd(width, "-")}] ${(ratio * 100).toFixed(1)}% (${processed}/${totalRepos})`;
+      process.stdout.write(`\r${bar}`);
+    };
+
+    if (this.opts.showProgressBar && totalRepos > 0) {
+      process.stdout.write(chalk.blue(`Fetching SBOMs for ${orgs.length} org(s) / ${totalRepos} repositories...`) + "\n");
+    }
 
     for (const org of orgs) {
-      console.log(chalk.blue(`Collecting SBOMs for org ${org}`));
-      const repos = await this.listOrgRepos(org);
+      if (!this.opts.showProgressBar) {
+        console.log(chalk.blue(`Collecting SBOMs for org ${org}`));
+      }
+      const repos = orgRepoMap[org];
       const repoNames = new Set(repos.map(r => r.name));
       const limit = pLimit(this.opts.concurrency);
-      this.summary.repositoryCount += repos.length;  // override with actual count, not the cached one
-
       let newSboms: RepositorySbom[] = [];
 
-      const tasks = repos.map((repo) => limit(async () => {
+      const tasks = repos.map(repo => limit(async () => {
         if (this.opts.delayMsBetweenRepos) {
           await new Promise(r => setTimeout(r, this.opts.delayMsBetweenRepos));
         }
         const fullName = `${org}/${repo.name}`;
         const baseline = this.baselineMap.get(fullName.toLowerCase());
-
+        let skipped = false;
         if (baseline && baseline.repoPushedAt && repo.pushed_at) {
           try {
             if (new Date(repo.pushed_at) <= new Date(baseline.repoPushedAt)) {
-              // Reuse baseline
               newSboms.push(baseline);
               this.summary.skippedCount++;
               this.decisions[fullName] = `Skipping (no new pushes since last fetch)`;
-              return;
+              skipped = true;
+              // Write baseline immediately if we have a cache dir (incremental reuse) so it's present early
+              if (this.opts.loadFromDir && this.opts.syncSboms && this.opts.loadFromDir && this.opts.loadFromDir.length) {
+                try { writeOne(baseline, { outDir: this.opts.loadFromDir }); } catch { /* ignore write errors */ }
+              }
+            } else {
+              this.decisions[fullName] = `Fetching because new pushes detected since last fetch: ${repo.pushed_at} > ${baseline.repoPushedAt}`;
             }
-            this.decisions[fullName] = `Fetching because new pushes detected since last fetch: ${repo.pushed_at} > ${baseline.repoPushedAt}`;
           } catch {
             this.decisions[fullName] = `Fetching because error comparing pushed_at (${baseline.repoPushedAt} / ${repo.pushed_at})`;
           }
         } else {
           this.decisions[fullName] = baseline ? `Fetching because missing pushed_at (${baseline.repoPushedAt} / ${repo.pushed_at})` : "Fetching because no baseline";
         }
-        const res = await this.fetchSbom(org, repo.name, repo);
-        newSboms.push(res);
-        if (res.error) this.summary.failedCount++; else this.summary.successCount++;
+        if (!skipped) {
+          const res = await this.fetchSbom(org, repo.name, repo);
+          newSboms.push(res);
+          if (res.error) this.summary.failedCount++; else this.summary.successCount++;
+          // Write freshly fetched SBOM immediately if a cache directory is configured
+          if (this.opts.loadFromDir && this.opts.syncSboms && this.opts.loadFromDir.length) {
+            try { writeOne(res, { outDir: this.opts.loadFromDir }); } catch { /* ignore write errors */ }
+          }
+        }
+        processed++;
+        renderBar();
       }));
       await Promise.all(tasks);
-      // clear up any old cached repos that are not in the current list of in var `repos` in the org
       newSboms = newSboms.filter(s => repoNames.has(s.repo));
       this.sboms.push(...newSboms);
     }
+    if (this.opts.showProgressBar) process.stdout.write("\n");
     this.summary.finishedAt = new Date().toISOString();
 
     return this.sboms;

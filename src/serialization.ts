@@ -17,6 +17,14 @@ export function writeAll(sboms: RepositorySbom[], { outDir, flatten = false }: S
   }
 }
 
+export function writeOne(sbom: RepositorySbom, { outDir, flatten = false }: SerializeOptions) {
+  const repoPath = flatten ? sbom.repo.replace(/\//g, "-") : sbom.repo;
+  const fileDir = path.join(outDir, repoPath);
+  const filePath = flatten ? path.join(outDir, `${repoPath}.json`) : path.join(fileDir, "sbom.json");
+  fs.mkdirSync(flatten ? path.dirname(filePath) : fileDir, { recursive: true });
+  fs.writeFileSync(filePath, JSON.stringify(sbom, null, 2), "utf8");
+}
+
 export interface ReadOptions { flatten?: boolean }
 
 export function readAll(dir: string, _opts: ReadOptions = {}): RepositorySbom[] {

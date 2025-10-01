@@ -10,12 +10,15 @@ Search collected SBOMs by PURL, cache them for offline analysis, sync malware se
 - Fetch SBOM per repo with concurrency + optional delay and retry/throttle handling
 - Search for packages by exact PURL, semver/range, or wildcard (trailing `/*` after the package name path segment)
 - Cache SBOMs in a single directory (JSON per repository) with offline re-use
+  - SBOMs are now written incrementally as each repository is fetched (no need to wait for the entire run)
 - Sync malware security advisories from the GitHub Advisory Database
 - Version-aware matching of SBOM packages vs. malware advisories
 - Optional SARIF 2.1.0 output per repository for malware matches with optional Code Scanning upload
 - Works with GitHub.com, GitHub Enterprise Server, GitHub Enterprise Managed Users and GitHub Enterprise Cloud with Data Residency (custom base URL)
 - Reason tracing: every search match shows which query matched; every malware match shows which advisory triggered it
 - Interactive REPL for ad‑hoc PURL queries (history, graceful Ctrl+C handling)
+- Optional progress bar while fetching SBOMs (suppresses normal per‑org logging)
+- Option to suppress secondary rate limit warnings (prevents breaking the progress bar display)
 
 ## Auth Requirements
 
@@ -50,13 +53,13 @@ node dist/cli.js --sync-sboms --enterprise ent \
 
 ### SBOM Caching Workflow
 
-1. First collection (populates cache):
+1. First collection (populates cache progressively as it runs):
 
 ```bash
 node dist/cli.js --sync-sboms --org my-org --sbom-cache sboms
 ```
 
-1. Later offline search (no API calls):
+1. Later offline search (no API calls; uses previously written per‑repo JSON):
 
 ```bash
 node dist/cli.js --sbom-cache sboms --purl pkg:npm/react@18.2.0
@@ -116,6 +119,27 @@ Notes:
 - The tool attempts to resolve the default branch commit SHA for each repo; if it cannot, that repo's upload is skipped.
 - SARIF upload merges are handled by GitHub; repeated uploads for the same commit replace earlier results for the same tool.
 
+### Progress Bar & Log Noise Suppression
+
+When collecting a large number of SBOMs you can enable a lightweight progress bar:
+
+```bash
+node dist/cli.js --sync-sboms --org my-org --sbom-cache sboms --progress
+```
+
+If you routinely encounter secondary rate limit warnings (which can visually disrupt the bar) you can silence those specific warnings:
+
+```bash
+node dist/cli.js --sync-sboms --org my-org --sbom-cache sboms --progress --suppress-secondary-rate-limit-logs
+```
+
+Behaviour details:
+
+- The bar shows overall completion across all organizations (if using `--enterprise`) once repository counts are enumerated.
+- Rendering is throttled (~12 fps) to avoid excessive stdout writes.
+- Standard error messages (e.g., hard failures) still appear.
+- Suppression only hides the secondary rate-limit informational warnings; primary rate limit retries still log once.
+
 ### Output Modes (Search Results)
 
 JSON only to stdout:
@@ -173,29 +197,6 @@ Alternatively, you can exercise the CLI purely offline using the fixtures (no to
 node dist/cli.js --sbom-cache fixtures/sboms --malware-cache fixtures/malware-cache --match-malware
 ```
 
-### Incremental Mode
-
-Skip re-fetching SBOMs for repositories whose `pushed_at` timestamp has not advanced vs. a baseline cache.
-
-1. Initial cache:
-
-```bash
-node dist/cli.js --sync-sboms --org my-org --sbom-cache sboms
-```
-
-1. Incremental refresh (re-uses existing JSON for unchanged repos, overwriting updated ones):
-
-```bash
-node dist/cli.js --sync-sboms --org my-org \
-  --sbom-cache sboms --baseline sboms --incremental
-```
-
-Summary output includes `Skipped: <n>` for reused repositories.
-
-Notes:
-
-- Any push to any branch updates `pushed_at` and will trigger a re-fetch even if default branch content didn’t change.
-- Future enhancement: conditional requests (ETag) or default branch commit SHA comparison for finer granularity.
 
 ## Build
 
@@ -243,8 +244,6 @@ node dist/cli.js --sync-sboms --org my-org --sbom-cache sboms --purl-file querie
 | `--sbom-cache <dir>` | Directory holding per-repo SBOM JSON files (required for offline mode; used as write target when syncing) |
 | `--sync-sboms` | Perform API calls to (re)collect SBOMs; without it the CLI runs offline loading cached SBOMs. Requires a GitHub token |
 | `--enterprise <slug>` / `--org <login>` | Scope selection (mutually exclusive when syncing) |
-| `--baseline <dir>` | Prior SBOM directory for incremental comparison |
-| `--incremental` | Skip SBOMs whose `pushed_at` unchanged vs baseline |
 | `--purl <purl>` | Add a PURL/range/wildcard query (repeatable) |
 | `--purl-file <file>` | File with one query per line |
 | `--json` | Emit search JSON to stdout (unless overridden by `--output-file`) |
@@ -259,6 +258,8 @@ node dist/cli.js --sync-sboms --org my-org --sbom-cache sboms --purl-file querie
 | `--concurrency <n>` | Parallel SBOM fetches (default 5) |
 | `--delay <ms>` | Delay between repository SBOM requests |
 | `--base-url <url>` | GitHub Enterprise Server REST base URL (ends with /api/v3) |
+| `--progress` | Show a dynamic progress bar during SBOM collection |
+| `--suppress-secondary-rate-limit-logs` | Hide secondary rate limit warning lines (useful with `--progress`) |
 
 ### Reason Tracing
 

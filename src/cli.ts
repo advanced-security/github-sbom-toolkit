@@ -3,7 +3,6 @@ import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
 import chalk from "chalk";
 import { SbomCollector } from "./sbomCollector.js";
-import { writeAll } from "./serialization.js";
 import inquirer from "inquirer"; // still used elsewhere if needed
 import readline from "readline";
 const { MalwareAdvisorySync } = await import("./malwareAdvisories.js");
@@ -20,6 +19,8 @@ async function main() {
     .option("sbom-cache", { type: "string", describe: "Directory to read/write cached SBOM JSON files" })
     .option("purl", { type: "array", describe: "One or more PURL strings to search (supports suffix * wildcard after slash)" })
     .option("sync-sboms", { type: "boolean", default: false, describe: "Fetch SBOMs from GitHub (write to --sbom-cache if provided) instead of offline-only" })
+  .option("progress", { type: "boolean", default: false, describe: "Show a progress bar while fetching SBOMs" })
+  .option("suppress-secondary-rate-limit-logs", { type: "boolean", default: false, describe: "Silence secondary rate limit warning logs (useful with --progress)" })
     .option("interactive", { type: "boolean", default: false, describe: "Enter interactive PURL search mode after collection" })
     .option("sync-malware", { type: "boolean", default: false, describe: "Sync malware advisories (MALWARE classification) to local cache" })
     .option("malware-cache", { type: "string", default: "malware-cache", describe: "Directory to store malware advisory cache" })
@@ -83,6 +84,8 @@ async function main() {
     delayMsBetweenRepos: argv.delay as number,
     loadFromDir: argv["sbom-cache"] as string | undefined,
     syncSboms: argv.syncSboms as boolean,
+    showProgressBar: argv.progress as boolean,
+    suppressSecondaryRateLimitLogs: argv.suppressSecondaryRateLimitLogs as boolean,
   });
 
   console.log(chalk.cyan(offline ? "Loading SBOMs from cache..." : "Collecting SBOMs from cache & GitHub..."));
@@ -129,9 +132,9 @@ async function main() {
       }
     }
   }
-  if (argv.syncSboms && argv["sbom-cache"] && summary.skippedCount != summary.repositoryCount) {
-    writeAll(sboms, { outDir: argv["sbom-cache"] as string });
-    console.log(chalk.blue(`Wrote SBOM JSON to cache directory ${argv["sbom-cache"]}`));
+  // Incremental write now handled inside collector; retain legacy behavior only if user wants to force a re-write
+  if (argv.syncSboms && argv["sbom-cache"] && summary.repositoryCount === summary.skippedCount) {
+    console.log(chalk.blue("All repositories reused from cache (no new SBOM writes)."));
   }
 
   const runSearch = (purls: string[]) => {
