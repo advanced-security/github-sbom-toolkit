@@ -157,19 +157,44 @@ export class SbomCollector {
         const fullName = `${org}/${repo.name}`;
         const baseline = this.baselineMap.get(fullName.toLowerCase());
         let skipped = false;
-        if (baseline && baseline.repoPushedAt && repo.pushed_at) {
+  let pendingCommitMeta: { sha?: string; date?: string } | undefined;
+  if (baseline && baseline.repoPushedAt && repo.pushed_at) {
           try {
             if (new Date(repo.pushed_at) <= new Date(baseline.repoPushedAt)) {
+              // repo pushed_at unchanged -> skip
               newSboms.push(baseline);
               this.summary.skippedCount++;
               this.decisions[fullName] = `Skipping (no new pushes since last fetch)`;
               skipped = true;
-              // Write SBOM immediately if we have a cache dir (incremental reuse) so it's present early
-              if (this.opts.loadFromDir && this.opts.syncSboms && this.opts.loadFromDir && this.opts.loadFromDir.length) {
-                try { writeOne(baseline, { outDir: this.opts.loadFromDir }); } catch { console.error(`Failed to write SBOM to ${this.opts.loadFromDir}`); }
-              }
             } else {
-              this.decisions[fullName] = `Fetching because new pushes detected since last fetch: ${repo.pushed_at} > ${baseline.repoPushedAt}`;
+              // There have been pushes; refine by checking default branch head commit date
+              if (repo.default_branch) {
+                try {
+                  const commitResp = await this.octokit!.request("GET /repos/{owner}/{repo}/commits/{ref}", { owner: org, repo: repo.name, ref: repo.default_branch });
+                  const commit = commitResp.data as { sha?: string; commit?: { author?: { date?: string }; committer?: { date?: string } } };
+                  const commitDate = commit.commit?.committer?.date || commit.commit?.author?.date;
+                  pendingCommitMeta = { sha: commit.sha, date: commitDate };
+                  if (commitDate) {
+                    const commitTime = new Date(commitDate).getTime();
+                    const previousRetrieval = new Date(baseline.retrievedAt).getTime();
+                    if (commitTime <= previousRetrieval) {
+                      // Default branch head hasn't advanced since last SBOM retrieval -> skip
+                      newSboms.push(baseline);
+                      this.summary.skippedCount++;
+                      this.decisions[fullName] = `Skipping (default branch commit not newer than previous SBOM: ${commitDate} <= ${baseline.retrievedAt})`;
+                      skipped = true;
+                    } else {
+                      this.decisions[fullName] = `Fetching (default branch commit is newer: ${commitDate} > ${baseline.retrievedAt})`;
+                    }
+                  } else {
+                    this.decisions[fullName] = `Fetching (commit date missing; pushes detected ${repo.pushed_at} > ${baseline.repoPushedAt})`;
+                  }
+                } catch (e) {
+                  this.decisions[fullName] = `Fetching (failed to get default branch commit for refinement: ${(e as Error).message})`;
+                }
+              } else {
+                this.decisions[fullName] = `Fetching (no default branch info to refine; pushes detected)`;
+              }
             }
           } catch {
             this.decisions[fullName] = `Fetching because error comparing pushed_at (${baseline.repoPushedAt} / ${repo.pushed_at})`;
@@ -179,6 +204,10 @@ export class SbomCollector {
         }
         if (!skipped) {
           const res = await this.fetchSbom(org, repo.name, repo);
+          if (pendingCommitMeta) {
+            res.defaultBranchCommitSha = pendingCommitMeta.sha;
+            res.defaultBranchCommitDate = pendingCommitMeta.date;
+          }
           newSboms.push(res);
           if (res.error) this.summary.failedCount++; else this.summary.successCount++;
           // Write freshly fetched SBOM immediately if a cache directory is configured

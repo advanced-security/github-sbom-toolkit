@@ -75,6 +75,8 @@ export interface RepositorySbom {
   repoUpdatedAt?: string; // repository.updated_at
   defaultBranch?: string; // repository.default_branch
   etag?: string; // ETag from SBOM response (future: conditional requests)
+  defaultBranchCommitSha?: string; // commit SHA of default branch at time of retrieval
+  defaultBranchCommitDate?: string; // ISO date of that commit
 }
 
 export interface CollectionSummary {

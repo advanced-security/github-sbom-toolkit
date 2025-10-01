@@ -20,6 +20,7 @@ Search collected SBOMs by PURL, cache them for offline analysis, sync malware se
 - Optional progress bar while fetching SBOMs (suppresses normal per‑org logging)
 - Option to suppress secondary rate limit warnings (prevents breaking the progress bar display)
 - Quiet mode to suppress non-error console output while retaining progress bar, human readable results and machine-readable JSON
+- Intelligent skip logic: if the repository was pushed to, but the default branch head commit date isn't newer than the prior SBOM retrieval, the existing cached SBOM is reused
 
 ## Auth Requirements
 
@@ -264,7 +265,7 @@ node dist/cli.js --sync-sboms --org my-org --sbom-cache sboms --purl-file querie
 | `--quiet` | Suppress all non-error and non-result output (progress bar, JSON and human readable output still show) |
 
 ### Reason Tracing
-    
+
 Output lines append a reason context:
 
 - Search matches: `{query: <original query string>}`
