@@ -34,13 +34,13 @@ Token needs scopes: `repo`, `read:org`, and `security_events` (for dependency gr
 Collect SBOMs for all repositories in an organization (writes JSON files into `sboms/`) then perform a PURL search:
 
 ```bash
-node dist/cli.js --sync-sboms --org my-org --sbom-cache sboms --purl pkg:npm/lodash@4.17.21
+npm run start -- --sync-sboms --org my-org --sbom-cache sboms --purl pkg:npm/lodash@4.17.21
 ```
 
 Search multiple PURLs (exact, wildcard, and a semver range). The `pkg:` prefix is optional; it will be auto-added:
 
 ```bash
-node dist/cli.js --sbom-cache sboms \
+npm run start -- --sbom-cache sboms \
   --purl npm/react@18.2.0 \
   --purl 'npm/express/*' \
   --purl 'npm/chalk@>=5.0.0 <6.0.0'
@@ -49,9 +49,7 @@ node dist/cli.js --sbom-cache sboms \
 Using GitHub Enterprise Server:
 
 ```bash
-node dist/cli.js --sync-sboms --enterprise ent \
-  --base-url https://github.internal/api/v3 \
-  --sbom-cache sboms --token $GHES_TOKEN
+npm run start -- --sync-sboms --enterprise ent --base-url https://github.internal/api/v3 --sbom-cache sboms --token $GHES_TOKEN
 ```
 
 ### SBOM Caching Workflow
@@ -59,13 +57,13 @@ node dist/cli.js --sync-sboms --enterprise ent \
 1. First collection (populates cache progressively as it runs):
 
 ```bash
-node dist/cli.js --sync-sboms --org my-org --sbom-cache sboms
+npm run start -- --sync-sboms --org my-org --sbom-cache sboms
 ```
 
 1. Later offline search (no API calls; uses previously written per‑repo JSON):
 
 ```bash
-node dist/cli.js --sbom-cache sboms --purl pkg:npm/react@18.2.0
+npm run start -- --sbom-cache sboms --purl pkg:npm/react@18.2.0
 ```
 
 ### Malware Advisory Sync & Matching
@@ -73,27 +71,25 @@ node dist/cli.js --sbom-cache sboms --purl pkg:npm/react@18.2.0
 Sync malware advisories and then match against SBOM packages in one run:
 
 ```bash
-node dist/cli.js \
-  --sync-sboms --org my-org --sbom-cache sboms \
-  --sync-malware --malware-cache malware-cache --match-malware
+npm run start -- --sync-sboms --org my-org --sbom-cache sboms --sync-malware --malware-cache malware-cache --match-malware
 ```
 
 Use already cached SBOMs (offline) while updating advisories:
 
 ```bash
-node dist/cli.js --sbom-cache sboms --sync-malware --malware-cache malware-cache --match-malware
+npm run start -- --sbom-cache sboms --sync-malware --malware-cache malware-cache --match-malware
 ```
 
 Offline match with already-cached malware advisories (no network calls):
 
 ```bash
-node dist/cli.js --sbom-cache sboms --malware-cache malware-cache --match-malware
+npm run start -- --sbom-cache sboms --malware-cache malware-cache --match-malware
 ```
 
 Write malware matches (and optionally search results later) to a JSON file using `--output-file`:
 
 ```bash
-node dist/cli.js --sbom-cache sboms --malware-cache malware-cache --match-malware --output-file report.json
+npm run start -- --sbom-cache sboms --malware-cache malware-cache --match-malware --output-file report.json
 ```
 
 If you also perform a search in the same invocation (add `--purl` or `--purl-file`), the JSON file will contain both `malwareMatches` and `search` top-level keys.
@@ -103,7 +99,7 @@ If you also perform a search in the same invocation (add `--purl` or `--purl-fil
 Generate SARIF 2.1.0 files (one per repository with matches) for malware findings:
 
 ```bash
-node dist/cli.js --sbom-cache sboms --malware-cache malware-cache --match-malware --sarif-dir sarif-out
+npm run start -- --sbom-cache sboms --malware-cache malware-cache --match-malware --sarif-dir sarif-out
 ```
 
 Each file is named `<owner>_<repo>.sarif` and contains rules (one per advisory GHSA) and results (one per matched package).
@@ -111,7 +107,7 @@ Each file is named `<owner>_<repo>.sarif` and contains rules (one per advisory G
 Upload those SARIF files to GitHub Code Scanning (creates alerts in each affected repository):
 
 ```bash
-node dist/cli.js --sbom-cache sboms --malware-cache malware-cache \
+npm run start -- --sbom-cache sboms --malware-cache malware-cache \
   --match-malware --sarif-dir sarif-out --upload-sarif --token $GITHUB_TOKEN
 ```
 
@@ -127,13 +123,13 @@ Notes:
 When collecting a large number of SBOMs you can enable a lightweight progress bar:
 
 ```bash
-node dist/cli.js --sync-sboms --org my-org --sbom-cache sboms --progress
+npm run start -- --sync-sboms --org my-org --sbom-cache sboms --progress
 ```
 
 If you routinely encounter secondary rate limit warnings (which can visually disrupt the bar) you can silence those specific warnings:
 
 ```bash
-node dist/cli.js --sync-sboms --org my-org --sbom-cache sboms --progress --suppress-secondary-rate-limit-logs
+npm run start -- --sync-sboms --org my-org --sbom-cache sboms --progress --suppress-secondary-rate-limit-logs
 ```
 
 Behaviour details:
@@ -148,13 +144,13 @@ Behaviour details:
 JSON only to stdout:
 
 ```bash
-node dist/cli.js --sbom-cache sboms --purl pkg:npm/chalk@5.6.1 --json
+npm run start -- --sbom-cache sboms --purl pkg:npm/chalk@5.6.1 --json
 ```
 
 Human + JSON (JSON written to file; stdout remains readable):
 
 ```bash
-node dist/cli.js --sbom-cache sboms --purl pkg:npm/chalk@5.6.1 \
+npm run start -- --sbom-cache sboms --purl pkg:npm/chalk@5.6.1 \
   --json --cli --output-file search-results.json
 ```
 
@@ -165,7 +161,7 @@ If you specify `--cli --json`, you must also supply `--output-file` to avoid cor
 Enter an interactive prompt (arrow key history, Ctrl+C handling) after initial collection/load:
 
 ```bash
-node dist/cli.js --sbom-cache sboms --interactive
+npm run start -- --sbom-cache sboms --interactive
 ```
 
 Then type one PURL query per line. Entering a blank line or using Ctrl+C on a blank line exits. Ctrl+C on a non-blank line clears the line.
@@ -197,9 +193,8 @@ chalk-org/chalk-repo => pkg:npm/chalk@5.6.1 matched advisory GHSA-test-chalk-561
 Alternatively, you can exercise the CLI purely offline using the fixtures (no token required):
 
 ```bash
-node dist/cli.js --sbom-cache fixtures/sboms --malware-cache fixtures/malware-cache --match-malware
+npm run start -- --sbom-cache fixtures/sboms --malware-cache fixtures/malware-cache --match-malware
 ```
-
 
 ## Build
 
@@ -231,13 +226,13 @@ pkg:npm/chalk@>=5.0.0 <6.0.0
 Run with (offline):
 
 ```bash
-node dist/cli.js --sbom-cache sboms --purl-file queries.txt
+npm run start -- --sbom-cache sboms --purl-file queries.txt
 ```
 
 Or (fresh sync + file-based queries):
 
 ```bash
-node dist/cli.js --sync-sboms --org my-org --sbom-cache sboms --purl-file queries.txt
+npm run start -- --sync-sboms --org my-org --sbom-cache sboms --purl-file queries.txt
 ```
 
 ### Argument Reference
