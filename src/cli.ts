@@ -16,7 +16,7 @@ async function main() {
     .option("org", { type: "string", describe: "Single organization login" })
     .option("base-url", { type: "string", describe: "GitHub Enterprise Server base URL, e.g. https://github.mycompany.com/api/v3" })
     .option("concurrency", { type: "number", default: 5 })
-    .option("delay", { type: "number", default: 0, describe: "Delay milliseconds between repository SBOM requests" })
+    .option("delay", { type: "number", default: 2000, describe: "Delay milliseconds between repository SBOM requests" })
     .option("sbom-cache", { type: "string", describe: "Directory to read/write cached SBOM JSON files" })
     .option("purl", { type: "array", describe: "One or more PURL strings to search (supports suffix * wildcard after slash)" })
     .option("sync-sboms", { type: "boolean", default: false, describe: "Fetch SBOMs from GitHub (write to --sbom-cache if provided) instead of offline-only" })

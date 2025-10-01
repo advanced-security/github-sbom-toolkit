@@ -3,6 +3,7 @@ import { paginateRest } from "@octokit/plugin-paginate-rest";
 import { restEndpointMethods } from "@octokit/plugin-rest-endpoint-methods";
 import { throttling } from "@octokit/plugin-throttling";
 import { retry } from "@octokit/plugin-retry";
+import chalk from "chalk";
 
 export interface OctokitFactoryOptions {
   token: string;
@@ -13,15 +14,11 @@ export interface OctokitFactoryOptions {
 const MyOctokit = Octokit.plugin(paginateRest, restEndpointMethods, throttling, retry);
 
 export function createOctokit({ token, baseUrl, userAgentExtra }: OctokitFactoryOptions) {
-  let normalizedBase = baseUrl?.replace(/\/$/, "");
-  if (normalizedBase && !/github\.com/.test(normalizedBase) && !/\/api\/v3$/.test(normalizedBase)) {
-    // Likely a GHES host root; append /api/v3
-    normalizedBase = `${normalizedBase}/api/v3`;
-  }
+  const normalizedBase = baseUrl?.replace(/\/$/, "");
   return new MyOctokit({
     auth: token,
     baseUrl: normalizedBase,
-    userAgent: `gh-sbom-collector/0.1.0 ${userAgentExtra ?? ""}`.trim(),
+    userAgent: `github-sbom-toolkit/0.1.0 ${userAgentExtra ?? ""}`.trim(),
     request: { timeout: 30_000 },
     retry: { doNotRetry: [400, 401, 403, 404] },
     throttle: {
@@ -35,10 +32,8 @@ export function createOctokit({ token, baseUrl, userAgentExtra }: OctokitFactory
         console.error(`Rate limit exceeded for ${opt.method} ${opt.url}. Not retrying.`);
         return false;
       },
-      onSecondaryRateLimit: async (retryAfter: number, options: unknown) => {
-        const opt = options as { method?: string; url?: string };
-        console.warn(`Secondary rate limit detected for ${opt.method} ${opt.url}. Pausing for ${retryAfter}s.`);
-        // do the pause of N seconds
+      onSecondaryRateLimit: async (retryAfter: number, _options: unknown) => {
+        console.warn(chalk.grey(`Secondary rate limit hit. Pausing for ${retryAfter}s.`));
         await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
         return true;
       }

@@ -71,7 +71,11 @@ export class SbomCollector {
 
       console.log(chalk.blue(`Loading SBOMs from cache at ${loadPath}`));
 
-      this.sboms = readAll(loadPath);
+      try {
+        this.sboms = readAll(loadPath);
+      } catch (error) {
+        console.error(chalk.yellow(`Didn't load any SBOMs from cache: ${error as Error}`));
+      }
 
       this.summary.repositoryCount = this.sboms.length;
       this.summary.successCount = this.sboms.filter(s => !s.error).length;
