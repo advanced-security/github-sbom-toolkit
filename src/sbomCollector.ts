@@ -60,11 +60,11 @@ export class SbomCollector {
         onSecondaryRateLimitHit: () => {
           // Increase SBOM delay (delayMsBetweenRepos) by 10% each time to reduce pressure.
           const oldDelay = this.opts.delayMsBetweenRepos;
-            const newDelay = Math.ceil(oldDelay * 1.1 + 1);
-            this.opts.delayMsBetweenRepos = newDelay as unknown as typeof this.opts.delayMsBetweenRepos;
-            if (!this.opts.quiet) {
-              console.warn(chalk.yellow(`Adaptive backoff: increased SBOM delay from ${oldDelay}ms to ${newDelay}ms after secondary rate limit.`));
-            }
+          const newDelay = Math.ceil(oldDelay * 1.1 + 1);
+          this.opts.delayMsBetweenRepos = newDelay as unknown as typeof this.opts.delayMsBetweenRepos;
+          if (!this.opts.quiet) {
+            console.warn(chalk.yellow(`Adaptive backoff: increased SBOM delay from ${oldDelay}ms to ${newDelay}ms after secondary rate limit.`));
+          }
         }
       });
     }
@@ -90,7 +90,7 @@ export class SbomCollector {
       // find just the path for a single org, if given
       const loadPath = this.opts.org ? `${this.opts.loadFromDir}/${this.opts.org}` : this.opts.loadFromDir;
 
-  if (!this.opts.quiet) console.log(chalk.blue(`Loading SBOMs from cache at ${loadPath}`));
+      if (!this.opts.quiet) console.log(chalk.blue(`Loading SBOMs from cache at ${loadPath}`));
 
       try {
         this.sboms = readAll(loadPath);
@@ -131,7 +131,7 @@ export class SbomCollector {
     const orgRepoMap: Record<string, { name: string; pushed_at?: string; updated_at?: string; default_branch?: string }[]> = {};
     let totalRepos = 0;
     for (const org of orgs) {
-  if (!this.opts.quiet) console.log(chalk.blue(`Listing repositories for org ${org}`));
+      if (!this.opts.quiet) console.log(chalk.blue(`Listing repositories for org ${org}`));
       if (this.opts.lightDelayMs) await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
       const repos = await this.listOrgRepos(org);
       orgRepoMap[org] = repos;
@@ -170,8 +170,8 @@ export class SbomCollector {
         const fullName = `${org}/${repo.name}`;
         const baseline = this.baselineMap.get(fullName.toLowerCase());
         let skipped = false;
-  let pendingCommitMeta: { sha?: string; date?: string } | undefined;
-  if (baseline && baseline.repoPushedAt && repo.pushed_at) {
+        let pendingCommitMeta: { sha?: string; date?: string } | undefined;
+        if (baseline && baseline.repoPushedAt && repo.pushed_at) {
           try {
             if (new Date(repo.pushed_at) <= new Date(baseline.repoPushedAt)) {
               // repo pushed_at unchanged -> skip

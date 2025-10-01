@@ -15,8 +15,8 @@ async function main() {
     .option("org", { type: "string", describe: "Single organization login" })
     .option("base-url", { type: "string", describe: "GitHub Enterprise Server base URL, e.g. https://github.mycompany.com/api/v3" })
     .option("concurrency", { type: "number", default: 5 })
-    .option("sbom-delay", { type: "number", default: 5000, describe: "Delay (ms) between SBOM fetch requests" })
-    .option("light-delay", { type: "number", default: 500, describe: "Delay (ms) between lightweight metadata requests (org/repo listing, commit head checks)" })
+    .option("sbom-delay", { type: "number", default: 3000, describe: "Delay (ms) between SBOM fetch requests" })
+    .option("light-delay", { type: "number", default: 100, describe: "Delay (ms) between lightweight metadata requests (org/repo listing, commit head checks)" })
     .option("sbom-cache", { type: "string", describe: "Directory to read/write cached SBOM JSON files" })
     .option("purl", { type: "array", describe: "One or more PURL strings to search (supports suffix * wildcard after slash)" })
     .option("sync-sboms", { type: "boolean", default: false, describe: "Fetch SBOMs from GitHub (write to --sbom-cache if provided) instead of offline-only" })
@@ -107,10 +107,10 @@ async function main() {
 
   if (argv["sync-malware"]) {
 
-  if (!quiet) console.log(chalk.cyan("Syncing malware advisories from GitHub Advisory Database..."));
+    if (!quiet) console.log(chalk.cyan("Syncing malware advisories from GitHub Advisory Database..."));
 
     const { added, updated, total } = await mas.sync();
-  if (!quiet) console.log(chalk.green(`Malware advisories sync complete. Added: ${added}, Updated: ${updated}, Total cached: ${total}`));
+    if (!quiet) console.log(chalk.green(`Malware advisories sync complete. Added: ${added}, Updated: ${updated}, Total cached: ${total}`));
   }
 
   let malwareMatches: import("./malwareMatcher.js").MalwareMatch[] | undefined;
