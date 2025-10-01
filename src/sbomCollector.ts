@@ -137,7 +137,7 @@ export class SbomCollector {
       process.stdout.write(`\r${bar}`);
     };
 
-    if (this.opts.showProgressBar && totalRepos > 0) {
+    if (this.opts.showProgressBar && totalRepos > 0 && !this.opts.quiet) {
       process.stdout.write(chalk.blue(`Fetching SBOMs for ${orgs.length} org(s) / ${totalRepos} repositories...`) + "\n");
     }
 
@@ -164,9 +164,9 @@ export class SbomCollector {
               this.summary.skippedCount++;
               this.decisions[fullName] = `Skipping (no new pushes since last fetch)`;
               skipped = true;
-              // Write baseline immediately if we have a cache dir (incremental reuse) so it's present early
+              // Write SBOM immediately if we have a cache dir (incremental reuse) so it's present early
               if (this.opts.loadFromDir && this.opts.syncSboms && this.opts.loadFromDir && this.opts.loadFromDir.length) {
-                try { writeOne(baseline, { outDir: this.opts.loadFromDir }); } catch { /* ignore write errors */ }
+                try { writeOne(baseline, { outDir: this.opts.loadFromDir }); } catch { console.error(`Failed to write SBOM to ${this.opts.loadFromDir}`); }
               }
             } else {
               this.decisions[fullName] = `Fetching because new pushes detected since last fetch: ${repo.pushed_at} > ${baseline.repoPushedAt}`;
