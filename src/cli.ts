@@ -189,7 +189,7 @@ async function main() {
           process.exit(1);
         }
       } else if (argv.json) {
-  const payloadObj: { search: unknown; malwareMatches?: import("./malwareMatcher.js").MalwareMatch[] } = { search: jsonSearch };
+        const payloadObj: { search: unknown; malwareMatches?: import("./malwareMatcher.js").MalwareMatch[] } = { search: jsonSearch };
         if (malwareMatches) payloadObj.malwareMatches = malwareMatches;
         process.stdout.write(JSON.stringify(payloadObj, null, 2) + "\n");
       }
@@ -209,7 +209,7 @@ async function main() {
   if (malwareMatches && argv.outputFile) {
     const fs = await import("fs");
     try {
-  let existing: { search?: unknown; malwareMatches?: import("./malwareMatcher.js").MalwareMatch[] } = {};
+      let existing: { search?: unknown; malwareMatches?: import("./malwareMatcher.js").MalwareMatch[] } = {};
       if (fs.existsSync(argv.outputFile as string)) {
         try { existing = JSON.parse(fs.readFileSync(argv.outputFile as string, "utf8")); } catch { existing = {}; }
       }
