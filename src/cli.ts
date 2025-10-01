@@ -120,6 +120,10 @@ async function main() {
       if (argv.sarifDir) {
         const sarifMap = buildSarifPerRepo(malwareMatches, mas.getAdvisories());
         writeSarifFiles(argv.sarifDir as string, sarifMap);
+        if (sarifMap.size === 0) {
+          console.log(chalk.yellow("No SARIF files generated."));
+          return;
+        }
         console.log(chalk.green(`Wrote SARIF for ${sarifMap.size} repos to ${argv.sarifDir}`));
         if (argv.uploadSarif) {
           if (!token) console.error(chalk.red("Token required for SARIF upload"));
