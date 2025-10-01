@@ -6,6 +6,7 @@ import { readAll } from "./serialization.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
 import pLimit from "p-limit";
+import chalk from "chalk";
 
 export interface CollectorOptions {
   token: string | undefined; // GitHub token with repo + security_events scope
@@ -16,8 +17,7 @@ export interface CollectorOptions {
   includePrivate?: boolean;
   delayMsBetweenRepos?: number;
   loadFromDir?: string; // optional pre-existing serialized SBOM directory
-  baselineDir?: string; // directory of previously fetched SBOMs to use as incremental baseline
-  incremental?: boolean; // enable skip based on pushed_at comparison
+  syncSboms?: boolean; // if true, fetch SBOMs from GitHub (requires token)
   autoEnableDependencyGraph?: boolean; // attempt to enable Dependency Graph if disabled
 }
 
@@ -27,6 +27,7 @@ export class SbomCollector {
   private sboms: RepositorySbom[] = [];
   private summary: CollectionSummary;
   private baselineMap: Map<string, RepositorySbom> = new Map();
+  private decisions: Record<string, string> = {}; // repo -> reason
 
   constructor(options: CollectorOptions) {
     if (!options.loadFromDir && !options.enterprise && !options.org) {
@@ -37,9 +38,9 @@ export class SbomCollector {
       includePrivate: true,
       delayMsBetweenRepos: 0,
       baseUrl: options.baseUrl ?? undefined,
-      incremental: false,
-      baselineDir: undefined,
       autoEnableDependencyGraph: true,
+      loadFromDir: options.loadFromDir ?? undefined,
+      syncSboms: options.syncSboms ?? false,
       ...options
     } as Required<CollectorOptions>;
 
@@ -56,50 +57,56 @@ export class SbomCollector {
       skippedCount: 0,
       startedAt: new Date().toISOString()
     };
-
-    // Load baseline if provided (independent from --load offline mode)
-    if (this.opts.baselineDir) {
-      try {
-        const baseline = readAll(this.opts.baselineDir);
-        for (const b of baseline) this.baselineMap.set(b.repo.toLowerCase(), b);
-      } catch (e) {
-        // Not fatal
-        // eslint-disable-next-line no-console
-        console.warn(`Failed to load baseline from ${this.opts.baselineDir}: ${e instanceof Error ? e.message : String(e)}`);
-      }
-    }
   }
 
   getAllSboms(): RepositorySbom[] { return this.sboms; }
   getSummary(): CollectionSummary { return this.summary; }
+  getDecisions(): Record<string, string> { return this.decisions; }
 
   async collect(): Promise<RepositorySbom[]> {
     // Offline mode: load from directory if provided
-    if (this.opts.loadFromDir && !this.opts.incremental) {
-      this.sboms = readAll(this.opts.loadFromDir);
+    if (this.opts.loadFromDir) {
+      // find just the path for a single org, if given
+      const loadPath = this.opts.org ? `${this.opts.loadFromDir}/${this.opts.org}` : this.opts.loadFromDir;
+
+      console.log(chalk.blue(`Loading SBOMs from cache at ${loadPath}`));
+
+      this.sboms = readAll(loadPath);
+
       this.summary.repositoryCount = this.sboms.length;
       this.summary.successCount = this.sboms.filter(s => !s.error).length;
       this.summary.failedCount = this.sboms.filter(s => !!s.error).length;
       this.summary.finishedAt = new Date().toISOString();
+
+      for (const sbom of this.sboms) this.baselineMap.set(sbom.repo.toLowerCase(), sbom);
+
       // Derive org list if present
       const orgSet = new Set<string>();
       for (const s of this.sboms) orgSet.add(s.org);
       this.summary.orgs = Array.from(orgSet);
+    }
+
+    if (!this.opts.syncSboms) {
       return this.sboms;
     }
 
     // Online mode: fetch from GitHub
-    if (!this.octokit) {
+    if (!this.octokit && this.opts.syncSboms) {
       throw new Error("No Octokit instance; token may be missing");
     }
 
     const orgs = this.opts.org ? [this.opts.org] : await this.listEnterpriseOrgs(this.opts.enterprise!);
     this.summary.orgs = orgs;
+    this.summary.repositoryCount = 0; // reset to recount
 
     for (const org of orgs) {
+      console.log(chalk.blue(`Collecting SBOMs for org ${org}`));
       const repos = await this.listOrgRepos(org);
+      const repoNames = new Set(repos.map(r => r.name));
       const limit = pLimit(this.opts.concurrency);
-      this.summary.repositoryCount += repos.length;
+      this.summary.repositoryCount += repos.length;  // override with actual count, not the cached one
+
+      let newSboms: RepositorySbom[] = [];
 
       const tasks = repos.map((repo) => limit(async () => {
         if (this.opts.delayMsBetweenRepos) {
@@ -107,25 +114,34 @@ export class SbomCollector {
         }
         const fullName = `${org}/${repo.name}`;
         const baseline = this.baselineMap.get(fullName.toLowerCase());
-        if (this.opts.incremental && baseline && baseline.repoPushedAt && repo.pushed_at) {
+
+        if (baseline && baseline.repoPushedAt && repo.pushed_at) {
           try {
             if (new Date(repo.pushed_at) <= new Date(baseline.repoPushedAt)) {
               // Reuse baseline
-              this.sboms.push(baseline);
+              newSboms.push(baseline);
               this.summary.skippedCount++;
+              this.decisions[fullName] = `Skipping (no new pushes since last fetch)`;
               return;
             }
+            this.decisions[fullName] = `Fetching because new pushes detected since last fetch: ${repo.pushed_at} > ${baseline.repoPushedAt}`;
           } catch {
-            // fall through
+            this.decisions[fullName] = `Fetching because error comparing pushed_at (${baseline.repoPushedAt} / ${repo.pushed_at})`;
           }
+        } else {
+          this.decisions[fullName] = baseline ? `Fetching because missing pushed_at (${baseline.repoPushedAt} / ${repo.pushed_at})` : "Fetching because no baseline";
         }
         const res = await this.fetchSbom(org, repo.name, repo);
-        this.sboms.push(res);
+        newSboms.push(res);
         if (res.error) this.summary.failedCount++; else this.summary.successCount++;
       }));
       await Promise.all(tasks);
+      // clear up any old cached repos that are not in the current list of in var `repos` in the org
+      newSboms = newSboms.filter(s => repoNames.has(s.repo));
+      this.sboms.push(...newSboms);
     }
     this.summary.finishedAt = new Date().toISOString();
+
     return this.sboms;
   }
 

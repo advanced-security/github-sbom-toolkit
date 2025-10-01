@@ -28,8 +28,6 @@ async function main() {
     .option("sarif-dir", { type: "string", describe: "Directory to write SARIF 2.1.0 files (one per repository) when --match-malware is used" })
     .option("upload-sarif", { type: "boolean", default: false, describe: "Upload generated SARIF (per-repo) to the Code Scanning API (requires --match-malware)" })
     .option("purl-file", { type: "string", describe: "Path to file with PURL queries (one per line; supports version ranges & wildcards; # or // for comments)" })
-    .option("incremental", { type: "boolean", default: false, describe: "Skip SBOM fetch for repos whose pushed_at has not advanced vs baseline" })
-    .option("baseline", { type: "string", describe: "Directory of prior SBOM JSON files used as baseline for --incremental" })
     .option("json", { type: "boolean", describe: "Emit search results as JSON to stdout (suppresses human output unless --cli also provided)" })
     .option("cli", { type: "boolean", describe: "When used with --json, also emit human-readable CLI output" })
     .option("output-file", { type: "string", describe: "Write search JSON output to this file (implied JSON generation). Required when using --cli with JSON." })
@@ -83,15 +81,14 @@ async function main() {
     baseUrl: argv["base-url"] as string | undefined,
     concurrency: argv.concurrency as number,
     delayMsBetweenRepos: argv.delay as number,
-    loadFromDir: offline ? (argv["sbom-cache"] as string | undefined) : undefined,
-    incremental: argv.incremental as boolean,
-    baselineDir: argv.baseline as string | undefined
+    loadFromDir: argv["sbom-cache"] as string | undefined,
+    syncSboms: argv.syncSboms as boolean,
   });
 
-  console.log(chalk.cyan(offline ? "Loading SBOMs from cache..." : "Collecting SBOMs from GitHub..."));
+  console.log(chalk.cyan(offline ? "Loading SBOMs from cache..." : "Collecting SBOMs from cache & GitHub..."));
   const sboms = await collector.collect();
   const summary = collector.getSummary();
-  console.log(chalk.green(`Done. Success: ${summary.successCount} / ${summary.repositoryCount}. Failed: ${summary.failedCount}. Skipped: ${summary.skippedCount}`));
+  console.log(chalk.green(`Done. Success: ${summary.successCount} / ${summary.repositoryCount}. Failed: ${summary.failedCount}. Cached: ${summary.skippedCount}`));
 
   const mas = new MalwareAdvisorySync({
     token: token!,
@@ -132,9 +129,9 @@ async function main() {
       }
     }
   }
-  if (argv.syncSboms && argv["sbom-cache"]) {
-    console.log(`Writing SBOM JSON to cache directory ${argv["sbom-cache"]}`);
+  if (argv.syncSboms && argv["sbom-cache"] && summary.skippedCount != summary.repositoryCount) {
     writeAll(sboms, { outDir: argv["sbom-cache"] as string });
+    console.log(chalk.blue(`Wrote SBOM JSON to cache directory ${argv["sbom-cache"]}`));
   }
 
   const runSearch = (purls: string[]) => {
