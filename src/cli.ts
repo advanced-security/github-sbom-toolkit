@@ -15,12 +15,13 @@ async function main() {
     .option("org", { type: "string", describe: "Single organization login" })
     .option("base-url", { type: "string", describe: "GitHub Enterprise Server base URL, e.g. https://github.mycompany.com/api/v3" })
     .option("concurrency", { type: "number", default: 5 })
-    .option("delay", { type: "number", default: 2000, describe: "Delay milliseconds between repository SBOM requests" })
+    .option("delay", { type: "number", default: 5000, describe: "Delay milliseconds between repository SBOM requests" })
     .option("sbom-cache", { type: "string", describe: "Directory to read/write cached SBOM JSON files" })
     .option("purl", { type: "array", describe: "One or more PURL strings to search (supports suffix * wildcard after slash)" })
     .option("sync-sboms", { type: "boolean", default: false, describe: "Fetch SBOMs from GitHub (write to --sbom-cache if provided) instead of offline-only" })
-  .option("progress", { type: "boolean", default: false, describe: "Show a progress bar while fetching SBOMs" })
-  .option("suppress-secondary-rate-limit-logs", { type: "boolean", default: false, describe: "Silence secondary rate limit warning logs (useful with --progress)" })
+    .option("progress", { type: "boolean", default: false, describe: "Show a progress bar while fetching SBOMs" })
+    .option("suppress-secondary-rate-limit-logs", { type: "boolean", default: false, describe: "Silence secondary rate limit warning logs (useful with --progress)" })
+    .option("quiet", { type: "boolean", default: false, describe: "Suppress all non-error output (does not suppress progress bar or JSON)" })
     .option("interactive", { type: "boolean", default: false, describe: "Enter interactive PURL search mode after collection" })
     .option("sync-malware", { type: "boolean", default: false, describe: "Sync malware advisories (MALWARE classification) to local cache" })
     .option("malware-cache", { type: "string", default: "malware-cache", describe: "Directory to store malware advisory cache" })
@@ -75,6 +76,7 @@ async function main() {
   }
 
   const offline = !argv.syncSboms;
+  const quiet = argv.quiet as boolean;
   const collector = new SbomCollector({
     token: token,
     enterprise: argv.enterprise as string | undefined,
@@ -86,12 +88,13 @@ async function main() {
     syncSboms: argv.syncSboms as boolean,
     showProgressBar: argv.progress as boolean,
     suppressSecondaryRateLimitLogs: argv.suppressSecondaryRateLimitLogs as boolean,
+    quiet,
   });
 
-  console.log(chalk.cyan(offline ? "Loading SBOMs from cache..." : "Collecting SBOMs from cache & GitHub..."));
+  if (!quiet) console.log(chalk.cyan(offline ? "Loading SBOMs from cache..." : "Collecting SBOMs from cache & GitHub..."));
   const sboms = await collector.collect();
   const summary = collector.getSummary();
-  console.log(chalk.green(`Done. Success: ${summary.successCount} / ${summary.repositoryCount}. Failed: ${summary.failedCount}. Cached: ${summary.skippedCount}`));
+  if (!quiet) console.log(chalk.green(`Done. Success: ${summary.successCount} / ${summary.repositoryCount}. Failed: ${summary.failedCount}. Cached: ${summary.skippedCount}`));
 
   const mas = new MalwareAdvisorySync({
     token: token!,
@@ -102,29 +105,31 @@ async function main() {
 
   if (argv["sync-malware"]) {
 
-    console.log(chalk.cyan("Syncing malware advisories from GitHub Advisory Database..."));
+  if (!quiet) console.log(chalk.cyan("Syncing malware advisories from GitHub Advisory Database..."));
 
     const { added, updated, total } = await mas.sync();
-    console.log(chalk.green(`Malware advisories sync complete. Added: ${added}, Updated: ${updated}, Total cached: ${total}`));
+  if (!quiet) console.log(chalk.green(`Malware advisories sync complete. Added: ${added}, Updated: ${updated}, Total cached: ${total}`));
   }
 
   let malwareMatches: import("./malwareMatcher.js").MalwareMatch[] | undefined;
   if (argv["match-malware"]) {
     const { matchMalware, buildSarifPerRepo, writeSarifFiles, uploadSarifPerRepo } = await import("./malwareMatcher.js");
     malwareMatches = matchMalware(mas.getAdvisories(), sboms);
-    console.log(chalk.magenta(`Malware matches found: ${malwareMatches?.length ?? 0}`));
+    if (!quiet) console.log(chalk.magenta(`Malware matches found: ${malwareMatches?.length ?? 0}`));
     if (malwareMatches) {
-      for (const m of malwareMatches) {
-        console.log(`${m.repo} :: ${m.purl} => ${m.advisoryGhsaId} (${m.vulnerableVersionRange ?? "(no range)"}) {advisory: ${m.reason}} ${m.advisoryPermalink}`);
+      if (!quiet) {
+        for (const m of malwareMatches) {
+          console.log(`${m.repo} :: ${m.purl} => ${m.advisoryGhsaId} (${m.vulnerableVersionRange ?? "(no range)"}) {advisory: ${m.reason}} ${m.advisoryPermalink}`);
+        }
       }
       if (argv.sarifDir) {
         const sarifMap = buildSarifPerRepo(malwareMatches, mas.getAdvisories());
         writeSarifFiles(argv.sarifDir as string, sarifMap);
         if (sarifMap.size === 0) {
-          console.log(chalk.yellow("No SARIF files generated."));
+          if (!quiet) console.log(chalk.yellow("No SARIF files generated."));
           return;
         }
-        console.log(chalk.green(`Wrote SARIF for ${sarifMap.size} repos to ${argv.sarifDir}`));
+        if (!quiet) console.log(chalk.green(`Wrote SARIF for ${sarifMap.size} repos to ${argv.sarifDir}`));
         if (argv.uploadSarif) {
           if (!token) console.error(chalk.red("Token required for SARIF upload"));
           else await uploadSarifPerRepo({ sarifDir: argv.sarifDir as string, matches: malwareMatches, advisories: mas.getAdvisories(), sboms, token, baseUrl: argv["base-url"] as string | undefined });
@@ -133,15 +138,15 @@ async function main() {
     }
   }
   // Incremental write now handled inside collector; retain legacy behavior only if user wants to force a re-write
-  if (argv.syncSboms && argv["sbom-cache"] && summary.repositoryCount === summary.skippedCount) {
+  if (!quiet && argv.syncSboms && argv["sbom-cache"] && summary.repositoryCount === summary.skippedCount) {
     console.log(chalk.blue("All repositories reused from cache (no new SBOM writes)."));
   }
 
   const runSearch = (purls: string[]) => {
     const results = collector.searchByPurlsWithReasons(purls);
-    console.log(chalk.magenta(`Search results for ${purls.length} purl(s):`));
+    if (!quiet) console.log(chalk.magenta(`Search results for ${purls.length} purl(s):`));
     if (!results.size) {
-      console.log("No matches.");
+      if (!quiet) console.log("No matches.");
       return;
     }
     for (const [repo, entries] of results.entries()) {
@@ -160,9 +165,7 @@ async function main() {
         if (!line || line.startsWith("#")) continue;
         filePurls.push(line);
       }
-      if (filePurls.length) {
-        console.log(chalk.cyan(`Loaded ${filePurls.length} PURL query(ies) from file`));
-      }
+      if (filePurls.length && !quiet) console.log(chalk.cyan(`Loaded ${filePurls.length} PURL query(ies) from file`));
     } catch (e) {
       console.error(chalk.red(`Failed to read purl file: ${e instanceof Error ? e.message : String(e)}`));
       process.exit(1);
@@ -186,7 +189,7 @@ async function main() {
           if (malwareMatches) existing.malwareMatches = existing.malwareMatches || malwareMatches; // preserve if already set
           const payload = JSON.stringify(existing, null, 2) + "\n";
           fs.writeFileSync(argv.outputFile as string, payload, "utf8");
-          console.log(chalk.green(`Wrote search JSON to ${argv.outputFile}`));
+          if (!quiet) console.log(chalk.green(`Wrote search JSON to ${argv.outputFile}`));
         } catch (e) {
           console.error(chalk.red(`Failed to write output file: ${e instanceof Error ? e.message : String(e)}`));
           process.exit(1);
@@ -218,7 +221,7 @@ async function main() {
       }
       existing.malwareMatches = malwareMatches;
       fs.writeFileSync(argv.outputFile as string, JSON.stringify(existing, null, 2) + "\n", "utf8");
-      console.log(chalk.green(`Wrote malware matches JSON to ${argv.outputFile}`));
+      if (!quiet) console.log(chalk.green(`Wrote malware matches JSON to ${argv.outputFile}`));
     } catch (e) {
       console.error(chalk.red(`Failed to write malware matches to output file: ${e instanceof Error ? e.message : String(e)}`));
     }
@@ -227,8 +230,10 @@ async function main() {
   if (argv.interactive) {
     // Prefer readline for native shell history (arrow up/down) so users can edit previous queries.
     if (process.stdin.isTTY && process.stdout.isTTY) {
-      console.log(chalk.cyan("Interactive mode: enter PURL queries (supports semver ranges, wildcards, version ranges)."));
-      console.log(chalk.cyan("Tips: Use arrow keys for history. Blank line or Ctrl+C on empty prompt exits. Ctrl+C on a non-empty line clears it."));
+      if (!quiet) {
+        console.log(chalk.cyan("Interactive mode: enter PURL queries (supports semver ranges, wildcards, version ranges)."));
+        console.log(chalk.cyan("Tips: Use arrow keys for history. Blank line or Ctrl+C on empty prompt exits. Ctrl+C on a non-empty line clears it."));
+      }
       const rl = readline.createInterface({
         input: process.stdin,
         output: process.stdout,
@@ -270,9 +275,7 @@ async function main() {
         rl.prompt();
       });
 
-      rl.on("close", () => {
-        console.log(chalk.cyan("Exiting interactive mode."));
-      });
+      rl.on("close", () => { if (!quiet) console.log(chalk.cyan("Exiting interactive mode.")); });
 
       rl.prompt();
       await new Promise<void>(resolve => rl.once("close", resolve));

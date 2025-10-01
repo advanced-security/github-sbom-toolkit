@@ -19,6 +19,7 @@ Search collected SBOMs by PURL, cache them for offline analysis, sync malware se
 - Interactive REPL for ad‑hoc PURL queries (history, graceful Ctrl+C handling)
 - Optional progress bar while fetching SBOMs (suppresses normal per‑org logging)
 - Option to suppress secondary rate limit warnings (prevents breaking the progress bar display)
+- Quiet mode to suppress non-error console output while retaining progress bar, human readable results and machine-readable JSON
 
 ## Auth Requirements
 
@@ -260,9 +261,10 @@ node dist/cli.js --sync-sboms --org my-org --sbom-cache sboms --purl-file querie
 | `--base-url <url>` | GitHub Enterprise Server REST base URL (ends with /api/v3) |
 | `--progress` | Show a dynamic progress bar during SBOM collection |
 | `--suppress-secondary-rate-limit-logs` | Hide secondary rate limit warning lines (useful with `--progress`) |
+| `--quiet` | Suppress all non-error and non-result output (progress bar, JSON and human readable output still show) |
 
 ### Reason Tracing
-
+    
 Output lines append a reason context:
 
 - Search matches: `{query: <original query string>}`

@@ -21,6 +21,7 @@ export interface CollectorOptions {
   autoEnableDependencyGraph?: boolean; // attempt to enable Dependency Graph if disabled
   showProgressBar?: boolean; // render a simple progress bar when fetching SBOMs
   suppressSecondaryRateLimitLogs?: boolean; // suppress secondary rate limit warning logs (so they don't break the progress bar)
+  quiet?: boolean; // suppress non-error logging (does not affect progress bar)
 }
 
 export class SbomCollector {
@@ -45,6 +46,7 @@ export class SbomCollector {
       syncSboms: options.syncSboms ?? false,
       showProgressBar: options.showProgressBar ?? false,
       suppressSecondaryRateLimitLogs: options.suppressSecondaryRateLimitLogs ?? false,
+      quiet: options.quiet ?? false,
       ...options
     } as Required<CollectorOptions>;
 
@@ -73,7 +75,7 @@ export class SbomCollector {
       // find just the path for a single org, if given
       const loadPath = this.opts.org ? `${this.opts.loadFromDir}/${this.opts.org}` : this.opts.loadFromDir;
 
-      console.log(chalk.blue(`Loading SBOMs from cache at ${loadPath}`));
+  if (!this.opts.quiet) console.log(chalk.blue(`Loading SBOMs from cache at ${loadPath}`));
 
       try {
         this.sboms = readAll(loadPath);
@@ -103,7 +105,7 @@ export class SbomCollector {
       throw new Error("No Octokit instance; token may be missing");
     }
 
-    if (this.opts.enterprise) {
+    if (this.opts.enterprise && !this.opts.quiet) {
       console.log(chalk.blue(`Getting list of organizations for enterprise ${this.opts.enterprise}`));
     }
 
@@ -114,7 +116,7 @@ export class SbomCollector {
     const orgRepoMap: Record<string, { name: string; pushed_at?: string; updated_at?: string; default_branch?: string }[]> = {};
     let totalRepos = 0;
     for (const org of orgs) {
-      console.log(chalk.blue(`Listing repositories for org ${org}`));
+  if (!this.opts.quiet) console.log(chalk.blue(`Listing repositories for org ${org}`));
       const repos = await this.listOrgRepos(org);
       orgRepoMap[org] = repos;
       totalRepos += repos.length;
@@ -140,7 +142,7 @@ export class SbomCollector {
     }
 
     for (const org of orgs) {
-      if (!this.opts.showProgressBar) {
+      if (!this.opts.showProgressBar && !this.opts.quiet) {
         console.log(chalk.blue(`Collecting SBOMs for org ${org}`));
       }
       const repos = orgRepoMap[org];
