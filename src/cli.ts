@@ -4,7 +4,8 @@ import { hideBin } from "yargs/helpers";
 import chalk from "chalk";
 import { SbomCollector } from "./sbomCollector.js";
 import { writeAll } from "./serialization.js";
-import inquirer from "inquirer";
+import inquirer from "inquirer"; // still used elsewhere if needed
+import readline from "readline";
 const { MalwareAdvisorySync } = await import("./malwareAdvisories.js");
 
 async function main() {
@@ -28,6 +29,8 @@ async function main() {
     .option("purl-file", { type: "string", describe: "Path to file with PURL queries (one per line; supports version ranges & wildcards; # or // for comments)" })
     .option("incremental", { type: "boolean", default: false, describe: "Skip SBOM fetch for repos whose pushed_at has not advanced vs baseline" })
     .option("baseline", { type: "string", describe: "Directory of prior SBOM JSON files used as baseline for --incremental" })
+    .option("json", { type: "boolean", describe: "Emit search results as JSON to stdout (suppresses human output unless --cli also provided)" })
+    .option("cli", { type: "boolean", describe: "When used with --json, also emit human-readable CLI output" })
     .check(args => {
       if (!args.load) {
         if (!args.enterprise && !args.org) throw new Error("Provide --enterprise or --org (or --load)\n");
@@ -84,7 +87,7 @@ async function main() {
     const matches = matchMalware(mas.getAdvisories(), sboms);
     console.log(chalk.magenta(`Malware matches found: ${matches.length}`));
     for (const m of matches) {
-      console.log(`${m.repo} :: ${m.purl} => ${m.advisoryGhsaId} (${m.vulnerableVersionRange}) ${m.advisoryPermalink}`);
+      console.log(`${m.repo} :: ${m.purl} => ${m.advisoryGhsaId} (${m.vulnerableVersionRange}) {advisory: ${m.reason}} ${m.advisoryPermalink}`);
     }
     if (argv["malware-report"]) {
       const fs = await import("fs");
@@ -103,15 +106,15 @@ async function main() {
   }
 
   const runSearch = (purls: string[]) => {
-    const results = collector.searchByPurls(purls);
+    const results = collector.searchByPurlsWithReasons(purls);
     console.log(chalk.magenta(`Search results for ${purls.length} purl(s):`));
     if (!results.size) {
       console.log("No matches.");
       return;
     }
-    for (const [repo, matches] of results.entries()) {
+    for (const [repo, entries] of results.entries()) {
       console.log(chalk.bold(repo));
-      for (const m of matches) console.log(`  - ${m}`);
+      for (const { purl, reason } of entries) console.log(`  - ${purl} {query: ${reason}}`);
     }
   };
   // Load queries from file if provided
@@ -133,19 +136,84 @@ async function main() {
       process.exit(1);
     }
   }
-  const combinedPurls = [ ...(argv.purl as string[] ?? []), ...filePurls ];
+  const combinedPurlsRaw = [...(argv.purl as string[] ?? []), ...filePurls];
+  const combinedPurls = combinedPurlsRaw.map(p => p.startsWith("pkg:") ? p : `pkg:${p}`);
   if (combinedPurls.length) {
-    runSearch(combinedPurls);
+    if (argv.json) {
+      // Build JSON structure of search results with reasons
+      const map = collector.searchByPurlsWithReasons(combinedPurls);
+      const json = Array.from(map.entries()).map(([repo, entries]) => ({ repo, matches: entries }));
+      process.stdout.write(JSON.stringify({ search: json }, null, 2) + "\n");
+      if (argv.cli) {
+        runSearch(combinedPurls); // also emit human-readable form
+      }
+    } else {
+      runSearch(combinedPurls);
+    }
   }
 
   if (argv.interactive) {
-    for (; ;) {
-      const ans = await inquirer.prompt<{ purls: string }>([
-        { name: "purls", message: "Enter comma-separated PURLs (blank to exit)", type: "input" }
-      ]);
-      if (!ans.purls) break;
-      const list = ans.purls.split(/[,\s]+/).filter(Boolean);
-      runSearch(list);
+    // Prefer readline for native shell history (arrow up/down) so users can edit previous queries.
+    if (process.stdin.isTTY && process.stdout.isTTY) {
+      console.log(chalk.cyan("Interactive mode: enter PURL queries (supports semver ranges, wildcards, version ranges)."));
+      console.log(chalk.cyan("Tips: Use arrow keys for history. Blank line or Ctrl+C on empty prompt exits. Ctrl+C on a non-empty line clears it."));
+      const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+        historySize: 2000,
+        prompt: "purl> ",
+        removeHistoryDuplicates: true
+      });
+
+      const closeGracefully = () => {
+        rl.close();
+      };
+
+      rl.on("SIGINT", () => {
+        // If current line is empty, exit. Else clear the line to allow quick re-entry.
+        if (!rl.line) {
+          process.stdout.write("\n");
+          closeGracefully();
+        } else {
+          // Clear current input line
+          // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+          // @ts-ignore - write with control sequence to clear
+          rl.write(null, { name: 'u', ctrl: true });
+          rl.prompt();
+        }
+      });
+
+      rl.on("line", (line: string) => {
+        const trimmed = line.trim();
+        if (!trimmed) {
+          closeGracefully();
+          return;
+        }
+        const list = trimmed.split(/[\s,]+/).filter(Boolean);
+        try {
+          runSearch(list);
+        } catch (e) {
+          console.error(chalk.red((e as Error).message));
+        }
+        rl.prompt();
+      });
+
+      rl.on("close", () => {
+        console.log(chalk.cyan("Exiting interactive mode."));
+      });
+
+      rl.prompt();
+      await new Promise<void>(resolve => rl.once("close", resolve));
+    } else {
+      // Fallback to inquirer if not a TTY
+      for (; ;) {
+        const ans = await inquirer.prompt<{ purls: string }>([
+          { name: "purls", message: "Enter comma-separated PURLs (blank to exit)", type: "input" }
+        ]);
+        if (!ans.purls) break;
+        const list = ans.purls.split(/[\s,]+/).filter(Boolean);
+        runSearch(list);
+      }
     }
   }
 }

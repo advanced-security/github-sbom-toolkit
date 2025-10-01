@@ -216,75 +216,72 @@ export class SbomCollector {
     }
   }
 
+  // Backwards compatibility wrapper (without reasons)
   searchByPurls(purls: string[]): Map<string, string[]> {
+    const withReasons = this.searchByPurlsWithReasons(purls);
+    const simple = new Map<string, string[]>();
+    for (const [repo, arr] of withReasons.entries()) simple.set(repo, arr.map(e => e.purl));
+    return simple;
+  }
+
+  // New method including the query that produced each match
+  searchByPurlsWithReasons(purls: string[]): Map<string, { purl: string; reason: string }[]> {
+    purls = purls.map(q => q.startsWith("pkg:") ? q : `pkg:${q}`);
     interface ParsedQuery {
       raw: string;
       lower: string;
       isPrefixWildcard: boolean;
-      exact?: string; // lowercase exact purl (for simple equality)
+      exact?: string;
       type?: string;
       name?: string;
-      versionConstraint?: string; // if semver range specified
+      versionConstraint?: string;
     }
-
     const looksLikeSemverRange = (v: string) => /[\^~><=]|\|\|/.test(v.trim());
-
     const parseQuery = (raw: string): ParsedQuery | null => {
       const trimmed = raw.trim();
       if (!trimmed) return null;
       const lower = trimmed.toLowerCase();
-      if (lower.endsWith("*")) {
-        return { raw: trimmed, lower, isPrefixWildcard: true };
-      }
+      if (lower.endsWith("*")) return { raw: trimmed, lower, isPrefixWildcard: true };
       if (lower.startsWith("pkg:")) {
         const atIdx = trimmed.indexOf("@");
         if (atIdx > -1) {
-          const coord = trimmed.slice(4, atIdx); // type/name
+          const coord = trimmed.slice(4, atIdx);
           const verPart = trimmed.slice(atIdx + 1).trim();
           const slashIdx = coord.indexOf("/");
-            if (slashIdx > 0) {
-              const type = coord.slice(0, slashIdx).toLowerCase();
-              const name = coord.slice(slashIdx + 1);
-              if (looksLikeSemverRange(verPart)) {
-                return { raw: trimmed, lower, isPrefixWildcard: false, type, name, versionConstraint: verPart };
-              }
+          if (slashIdx > 0) {
+            const type = coord.slice(0, slashIdx).toLowerCase();
+            const name = coord.slice(slashIdx + 1);
+            if (looksLikeSemverRange(verPart)) {
+              return { raw: trimmed, lower, isPrefixWildcard: false, type, name, versionConstraint: verPart };
             }
+          }
         }
-        // treat as exact purl string match
         return { raw: trimmed, lower, isPrefixWildcard: false, exact: lower };
       }
       return { raw: trimmed, lower, isPrefixWildcard: false, exact: lower };
     };
-
     const queries: ParsedQuery[] = purls.map(parseQuery).filter((q): q is ParsedQuery => !!q);
-    const results = new Map<string, string[]>();
-
+    const results = new Map<string, { purl: string; reason: string }[]>();
     if (!queries.length) return results;
-
     for (const repoSbom of this.sboms) {
       if (repoSbom.error) continue;
-      const matched = new Set<string>();
-      // gather all purls from package externalRefs or package.purl
       interface ExtRef { referenceType: string; referenceLocator: string }
+      const found = new Map<string, string>(); // purl -> query
       for (const pkg of repoSbom.packages as Array<SbomPackage & { externalRefs?: ExtRef[] }>) {
         const refs = pkg.externalRefs;
         const candidatePurls: string[] = [];
-        if (refs) {
-          for (const r of refs) if (r.referenceType === "purl" && r.referenceLocator) candidatePurls.push(r.referenceLocator);
-        }
-  if (pkg.purl) candidatePurls.push(pkg.purl);
-        // de-dup
+        if (refs) for (const r of refs) if (r.referenceType === "purl" && r.referenceLocator) candidatePurls.push(r.referenceLocator);
+        if ((pkg as { purl?: string }).purl) candidatePurls.push((pkg as { purl?: string }).purl as string);
         const unique = Array.from(new Set(candidatePurls));
         for (const p of unique) {
           const pLower = p.toLowerCase();
           for (const q of queries) {
             if (q.isPrefixWildcard) {
-              const prefix = q.lower.slice(0, -1); // remove *
-              if (pLower.startsWith(prefix)) matched.add(p);
+              const prefix = q.lower.slice(0, -1);
+              if (pLower.startsWith(prefix)) { if (!found.has(p)) found.set(p, q.raw); }
               continue;
             }
             if (q.versionConstraint && q.type && q.name) {
-              // parse package purl into type/name@version
               if (!pLower.startsWith("pkg:")) continue;
               const body = p.slice(4);
               const atIdx = body.indexOf("@");
@@ -298,19 +295,17 @@ export class SbomCollector {
                 try {
                   const coerced = semver.coerce(ver)?.version || ver;
                   if (semver.valid(coerced) && semver.satisfies(coerced, q.versionConstraint, { includePrerelease: true })) {
-                    matched.add(p);
+                    if (!found.has(p)) found.set(p, q.raw);
                   }
-                } catch {
-                  // ignore invalid semver
-                }
+                } catch { /* ignore */ }
               }
             } else if (q.exact) {
-              if (pLower === q.exact) matched.add(p);
+              if (pLower === q.exact) { if (!found.has(p)) found.set(p, q.raw); }
             }
           }
         }
       }
-      if (matched.size) results.set(repoSbom.repo, Array.from(matched));
+      if (found.size) results.set(repoSbom.repo, Array.from(found.entries()).map(([purl, reason]) => ({ purl, reason })));
     }
     return results;
   }
