@@ -11,7 +11,8 @@
     "build": "tsc --project tsconfig.json",
     "start": "node dist/cli.js",
     "dev": "tsx src/cli.ts",
-    "lint": "eslint . --ext .ts --max-warnings=0"
+    "lint": "eslint . --ext .ts --max-warnings=0",
+    "test": "node dist/test-fixture-match.js"
   },
   "engines": {
     "node": ">=18.0.0"

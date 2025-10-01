@@ -216,14 +216,6 @@ export class SbomCollector {
     }
   }
 
-  // Backwards compatibility wrapper (without reasons)
-  searchByPurls(purls: string[]): Map<string, string[]> {
-    const withReasons = this.searchByPurlsWithReasons(purls);
-    const simple = new Map<string, string[]>();
-    for (const [repo, arr] of withReasons.entries()) simple.set(repo, arr.map(e => e.purl));
-    return simple;
-  }
-
   // New method including the query that produced each match
   searchByPurlsWithReasons(purls: string[]): Map<string, { purl: string; reason: string }[]> {
     purls = purls.map(q => q.startsWith("pkg:") ? q : `pkg:${q}`);
