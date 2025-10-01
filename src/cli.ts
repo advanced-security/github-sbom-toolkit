@@ -17,14 +17,16 @@ async function main() {
     .option("base-url", { type: "string", describe: "GitHub Enterprise Server base URL, e.g. https://github.mycompany.com/api/v3" })
     .option("concurrency", { type: "number", default: 5 })
     .option("delay", { type: "number", default: 0, describe: "Delay milliseconds between repository SBOM requests" })
-  .option("sbom-cache", { type: "string", describe: "Directory to read/write cached SBOM JSON files" })
+    .option("sbom-cache", { type: "string", describe: "Directory to read/write cached SBOM JSON files" })
     .option("purl", { type: "array", describe: "One or more PURL strings to search (supports suffix * wildcard after slash)" })
-  .option("sync-sboms", { type: "boolean", default: false, describe: "Fetch SBOMs from GitHub (write to --sbom-cache if provided) instead of offline-only" })
+    .option("sync-sboms", { type: "boolean", default: false, describe: "Fetch SBOMs from GitHub (write to --sbom-cache if provided) instead of offline-only" })
     .option("interactive", { type: "boolean", default: false, describe: "Enter interactive PURL search mode after collection" })
     .option("sync-malware", { type: "boolean", default: false, describe: "Sync malware advisories (MALWARE classification) to local cache" })
     .option("malware-cache", { type: "string", default: "malware-cache", describe: "Directory to store malware advisory cache" })
     .option("malware-since", { type: "string", describe: "Override last sync timestamp (ISO) for malware advisory incremental sync" })
     .option("match-malware", { type: "boolean", default: false, describe: "After sync/load, match SBOM packages against malware advisories" })
+    .option("sarif-dir", { type: "string", describe: "Directory to write SARIF 2.1.0 files (one per repository) when --match-malware is used" })
+    .option("upload-sarif", { type: "boolean", default: false, describe: "Upload generated SARIF (per-repo) to the Code Scanning API (requires --match-malware)" })
     .option("purl-file", { type: "string", describe: "Path to file with PURL queries (one per line; supports version ranges & wildcards; # or // for comments)" })
     .option("incremental", { type: "boolean", default: false, describe: "Skip SBOM fetch for repos whose pushed_at has not advanced vs baseline" })
     .option("baseline", { type: "string", describe: "Directory of prior SBOM JSON files used as baseline for --incremental" })
@@ -53,6 +55,12 @@ async function main() {
       if (args["sync-malware"] && !args["malware-cache"]) {
         throw new Error("--sync-malware must be used with --malware-cache to store advisories.")
       }
+      if (args.uploadSarif && !args["match-malware"]) {
+        throw new Error("--upload-sarif requires --match-malware to generate findings.");
+      }
+      if (args.uploadSarif && !args.sarifDir) {
+        throw new Error("--upload-sarif requires --sarif-dir to write SARIF files prior to upload.");
+      }
       return true;
     })
     .help()
@@ -60,7 +68,7 @@ async function main() {
 
   const token = argv.token as string | undefined || process.env.GITHUB_TOKEN;
 
-  if (argv.sbom || argv["sync-malware"]) {
+  if (argv.sbom || argv["sync-malware"] || argv.uploadSarif) {
     if (!token) {
       console.error(chalk.red("GitHub token must be provided via --token or GITHUB_TOKEN environment variable"));
       process.exit(1);
@@ -100,19 +108,25 @@ async function main() {
     console.log(chalk.green(`Malware advisories sync complete. Added: ${added}, Updated: ${updated}, Total cached: ${total}`));
   }
 
-  interface MalwareMatchRecord { repo: string; purl: string; advisoryGhsaId: string; vulnerableVersionRange: string | null; reason: string; advisoryPermalink: string; }
-  let malwareMatches: MalwareMatchRecord[] | undefined;
+  let malwareMatches: import("./malwareMatcher.js").MalwareMatch[] | undefined;
   if (argv["match-malware"]) {
-    const { matchMalware } = await import("./malwareMatcher.js");
-    malwareMatches = matchMalware(mas.getAdvisories(), sboms) as MalwareMatchRecord[];
+    const { matchMalware, buildSarifPerRepo, writeSarifFiles, uploadSarifPerRepo } = await import("./malwareMatcher.js");
+    malwareMatches = matchMalware(mas.getAdvisories(), sboms);
     console.log(chalk.magenta(`Malware matches found: ${malwareMatches?.length ?? 0}`));
     if (malwareMatches) {
       for (const m of malwareMatches) {
         console.log(`${m.repo} :: ${m.purl} => ${m.advisoryGhsaId} (${m.vulnerableVersionRange ?? "(no range)"}) {advisory: ${m.reason}} ${m.advisoryPermalink}`);
       }
+      if (argv.sarifDir) {
+        const sarifMap = buildSarifPerRepo(malwareMatches, mas.getAdvisories());
+        writeSarifFiles(argv.sarifDir as string, sarifMap);
+        console.log(chalk.green(`Wrote SARIF for ${sarifMap.size} repos to ${argv.sarifDir}`));
+        if (argv.uploadSarif) {
+          if (!token) console.error(chalk.red("Token required for SARIF upload"));
+          else await uploadSarifPerRepo({ sarifDir: argv.sarifDir as string, matches: malwareMatches, advisories: mas.getAdvisories(), sboms, token, baseUrl: argv["base-url"] as string | undefined });
+        }
+      }
     }
-    // If an output file is specified, we will merge malware matches into it later (after search),
-    // but if no search occurs we still write it now.
   }
   if (argv.syncSboms && argv["sbom-cache"]) {
     console.log(`Writing SBOM JSON to cache directory ${argv["sbom-cache"]}`);
@@ -160,10 +174,10 @@ async function main() {
       if (argv.outputFile) {
         try {
           const fs = await import("fs");
-          let existing: { search?: unknown; malwareMatches?: MalwareMatchRecord[] } = {};
-            if (fs.existsSync(argv.outputFile as string)) {
-              try { existing = JSON.parse(fs.readFileSync(argv.outputFile as string, "utf8")); } catch { existing = {}; }
-            }
+          let existing: { search?: unknown; malwareMatches?: import("./malwareMatcher.js").MalwareMatch[] } = {};
+          if (fs.existsSync(argv.outputFile as string)) {
+            try { existing = JSON.parse(fs.readFileSync(argv.outputFile as string, "utf8")); } catch { existing = {}; }
+          }
           existing.search = jsonSearch;
           if (malwareMatches) existing.malwareMatches = existing.malwareMatches || malwareMatches; // preserve if already set
           const payload = JSON.stringify(existing, null, 2) + "\n";
@@ -174,7 +188,7 @@ async function main() {
           process.exit(1);
         }
       } else if (argv.json) {
-  const payloadObj: { search: unknown; malwareMatches?: MalwareMatchRecord[] } = { search: jsonSearch };
+  const payloadObj: { search: unknown; malwareMatches?: import("./malwareMatcher.js").MalwareMatch[] } = { search: jsonSearch };
         if (malwareMatches) payloadObj.malwareMatches = malwareMatches;
         process.stdout.write(JSON.stringify(payloadObj, null, 2) + "\n");
       }
@@ -194,7 +208,7 @@ async function main() {
   if (malwareMatches && argv.outputFile) {
     const fs = await import("fs");
     try {
-  let existing: { search?: unknown; malwareMatches?: MalwareMatchRecord[] } = {};
+  let existing: { search?: unknown; malwareMatches?: import("./malwareMatcher.js").MalwareMatch[] } = {};
       if (fs.existsSync(argv.outputFile as string)) {
         try { existing = JSON.parse(fs.readFileSync(argv.outputFile as string, "utf8")); } catch { existing = {}; }
       }
