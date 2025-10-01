@@ -17,24 +17,41 @@ async function main() {
     .option("base-url", { type: "string", describe: "GitHub Enterprise Server base URL, e.g. https://github.mycompany.com/api/v3" })
     .option("concurrency", { type: "number", default: 5 })
     .option("delay", { type: "number", default: 0, describe: "Delay milliseconds between repository SBOM requests" })
-    .option("out", { type: "string", describe: "Directory to serialize SBOM JSON files" })
+  .option("sbom-cache", { type: "string", describe: "Directory to read/write cached SBOM JSON files" })
     .option("purl", { type: "array", describe: "One or more PURL strings to search (supports suffix * wildcard after slash)" })
-    .option("load", { type: "string", describe: "Directory of previously serialized SBOM JSON files to load instead of fetching" })
+  .option("sync-sboms", { type: "boolean", default: false, describe: "Fetch SBOMs from GitHub (write to --sbom-cache if provided) instead of offline-only" })
     .option("interactive", { type: "boolean", default: false, describe: "Enter interactive PURL search mode after collection" })
     .option("sync-malware", { type: "boolean", default: false, describe: "Sync malware advisories (MALWARE classification) to local cache" })
     .option("malware-cache", { type: "string", default: "malware-cache", describe: "Directory to store malware advisory cache" })
     .option("malware-since", { type: "string", describe: "Override last sync timestamp (ISO) for malware advisory incremental sync" })
     .option("match-malware", { type: "boolean", default: false, describe: "After sync/load, match SBOM packages against malware advisories" })
-    .option("malware-report", { type: "string", describe: "If set, write malware match results (JSON array) to this file when --match-malware is used" })
     .option("purl-file", { type: "string", describe: "Path to file with PURL queries (one per line; supports version ranges & wildcards; # or // for comments)" })
     .option("incremental", { type: "boolean", default: false, describe: "Skip SBOM fetch for repos whose pushed_at has not advanced vs baseline" })
     .option("baseline", { type: "string", describe: "Directory of prior SBOM JSON files used as baseline for --incremental" })
     .option("json", { type: "boolean", describe: "Emit search results as JSON to stdout (suppresses human output unless --cli also provided)" })
     .option("cli", { type: "boolean", describe: "When used with --json, also emit human-readable CLI output" })
+    .option("output-file", { type: "string", describe: "Write search JSON output to this file (implied JSON generation). Required when using --cli with JSON." })
     .check(args => {
-      if (!args.load) {
-        if (!args.enterprise && !args.org) throw new Error("Provide --enterprise or --org (or --load)\n");
+      const syncing = !!args.syncSboms;
+      if (syncing) {
+        if (!args.enterprise && !args.org) throw new Error("Provide --enterprise or --org with --sync-sboms");
         if (args.enterprise && args.org) throw new Error("Specify only one of --enterprise or --org");
+      } else {
+        if (!args.sbomCache) throw new Error("Offline mode requires --sbom-cache (omit --sync-sboms)");
+      }
+      // If --cli is specified in combination intending JSON, require an output file to avoid mixed stdout streams.
+      if (args.cli && !args.outputFile && !args.json) {
+        throw new Error("--cli provided without --json/--output-file. Use --json --cli --output-file <path> to emit both.");
+      }
+      if (args.cli && !args.outputFile && args.json) {
+        throw new Error("--cli with --json requires --output-file to avoid interleaving JSON and human output on stdout.");
+      }
+      // check that --malware-cache is provided
+      if (args["match-malware"] && !args["malware-cache"]) {
+        throw new Error("--match-malware must be used with --malware-cache to provide advisories to match against.")
+      }
+      if (args["sync-malware"] && !args["malware-cache"]) {
+        throw new Error("--sync-malware must be used with --malware-cache to store advisories.")
       }
       return true;
     })
@@ -50,6 +67,7 @@ async function main() {
     }
   }
 
+  const offline = !argv.syncSboms;
   const collector = new SbomCollector({
     token: token,
     enterprise: argv.enterprise as string | undefined,
@@ -57,12 +75,12 @@ async function main() {
     baseUrl: argv["base-url"] as string | undefined,
     concurrency: argv.concurrency as number,
     delayMsBetweenRepos: argv.delay as number,
-    loadFromDir: argv.load as string | undefined,
+    loadFromDir: offline ? (argv["sbom-cache"] as string | undefined) : undefined,
     incremental: argv.incremental as boolean,
     baselineDir: argv.baseline as string | undefined
   });
 
-  console.log(chalk.cyan(collector['opts'].loadFromDir ? "Loading SBOMs..." : "Collecting SBOMs..."));
+  console.log(chalk.cyan(offline ? "Loading SBOMs from cache..." : "Collecting SBOMs from API..."));
   const sboms = await collector.collect();
   const summary = collector.getSummary();
   console.log(chalk.green(`Done. Success: ${summary.successCount} / ${summary.repositoryCount}. Failed: ${summary.failedCount}. Skipped: ${summary.skippedCount}`));
@@ -82,27 +100,23 @@ async function main() {
     console.log(chalk.green(`Malware advisories sync complete. Added: ${added}, Updated: ${updated}, Total cached: ${total}`));
   }
 
+  interface MalwareMatchRecord { repo: string; purl: string; advisoryGhsaId: string; vulnerableVersionRange: string | null; reason: string; advisoryPermalink: string; }
+  let malwareMatches: MalwareMatchRecord[] | undefined;
   if (argv["match-malware"]) {
     const { matchMalware } = await import("./malwareMatcher.js");
-    const matches = matchMalware(mas.getAdvisories(), sboms);
-    console.log(chalk.magenta(`Malware matches found: ${matches.length}`));
-    for (const m of matches) {
-      console.log(`${m.repo} :: ${m.purl} => ${m.advisoryGhsaId} (${m.vulnerableVersionRange}) {advisory: ${m.reason}} ${m.advisoryPermalink}`);
-    }
-    if (argv["malware-report"]) {
-      const fs = await import("fs");
-      const outPath = argv["malware-report"] as string;
-      try {
-        fs.writeFileSync(outPath, JSON.stringify(matches, null, 2), "utf8");
-        console.log(chalk.green(`Wrote malware match report to ${outPath}`));
-      } catch (e) {
-        console.error(chalk.red(`Failed to write malware report: ${e instanceof Error ? e.message : String(e)}`));
+    malwareMatches = matchMalware(mas.getAdvisories(), sboms) as MalwareMatchRecord[];
+    console.log(chalk.magenta(`Malware matches found: ${malwareMatches?.length ?? 0}`));
+    if (malwareMatches) {
+      for (const m of malwareMatches) {
+        console.log(`${m.repo} :: ${m.purl} => ${m.advisoryGhsaId} (${m.vulnerableVersionRange ?? "(no range)"}) {advisory: ${m.reason}} ${m.advisoryPermalink}`);
       }
     }
+    // If an output file is specified, we will merge malware matches into it later (after search),
+    // but if no search occurs we still write it now.
   }
-  if (argv.out) {
-    console.log(`Writing SBOM JSON to ${argv.out}`);
-    writeAll(sboms, { outDir: argv.out as string });
+  if (argv.syncSboms && argv["sbom-cache"]) {
+    console.log(`Writing SBOM JSON to cache directory ${argv["sbom-cache"]}`);
+    writeAll(sboms, { outDir: argv["sbom-cache"] as string });
   }
 
   const runSearch = (purls: string[]) => {
@@ -139,16 +153,56 @@ async function main() {
   const combinedPurlsRaw = [...(argv.purl as string[] ?? []), ...filePurls];
   const combinedPurls = combinedPurlsRaw.map(p => p.startsWith("pkg:") ? p : `pkg:${p}`);
   if (combinedPurls.length) {
-    if (argv.json) {
-      // Build JSON structure of search results with reasons
+    const needJson = argv.json || argv.outputFile;
+    if (needJson) {
       const map = collector.searchByPurlsWithReasons(combinedPurls);
-      const json = Array.from(map.entries()).map(([repo, entries]) => ({ repo, matches: entries }));
-      process.stdout.write(JSON.stringify({ search: json }, null, 2) + "\n");
-      if (argv.cli) {
-        runSearch(combinedPurls); // also emit human-readable form
+      const jsonSearch = Array.from(map.entries()).map(([repo, entries]) => ({ repo, matches: entries }));
+      if (argv.outputFile) {
+        try {
+          const fs = await import("fs");
+          let existing: { search?: unknown; malwareMatches?: MalwareMatchRecord[] } = {};
+            if (fs.existsSync(argv.outputFile as string)) {
+              try { existing = JSON.parse(fs.readFileSync(argv.outputFile as string, "utf8")); } catch { existing = {}; }
+            }
+          existing.search = jsonSearch;
+          if (malwareMatches) existing.malwareMatches = existing.malwareMatches || malwareMatches; // preserve if already set
+          const payload = JSON.stringify(existing, null, 2) + "\n";
+          fs.writeFileSync(argv.outputFile as string, payload, "utf8");
+          console.log(chalk.green(`Wrote search JSON to ${argv.outputFile}`));
+        } catch (e) {
+          console.error(chalk.red(`Failed to write output file: ${e instanceof Error ? e.message : String(e)}`));
+          process.exit(1);
+        }
+      } else if (argv.json) {
+  const payloadObj: { search: unknown; malwareMatches?: MalwareMatchRecord[] } = { search: jsonSearch };
+        if (malwareMatches) payloadObj.malwareMatches = malwareMatches;
+        process.stdout.write(JSON.stringify(payloadObj, null, 2) + "\n");
+      }
+      // If CLI output requested (either implicit because no --json OR explicit --cli with output-file requirement) then show human form
+      if (!needJson || (argv.cli && needJson)) {
+        runSearch(combinedPurls);
+      } else if (argv.cli) { // This branch only occurs when validation prevented missing output-file
+        runSearch(combinedPurls);
       }
     } else {
+      // Pure CLI
       runSearch(combinedPurls);
+    }
+  }
+
+  // If malware matches were computed but no search JSON writing happened yet and an output file was requested, persist them now.
+  if (malwareMatches && argv.outputFile) {
+    const fs = await import("fs");
+    try {
+  let existing: { search?: unknown; malwareMatches?: MalwareMatchRecord[] } = {};
+      if (fs.existsSync(argv.outputFile as string)) {
+        try { existing = JSON.parse(fs.readFileSync(argv.outputFile as string, "utf8")); } catch { existing = {}; }
+      }
+      existing.malwareMatches = malwareMatches;
+      fs.writeFileSync(argv.outputFile as string, JSON.stringify(existing, null, 2) + "\n", "utf8");
+      console.log(chalk.green(`Wrote malware matches JSON to ${argv.outputFile}`));
+    } catch (e) {
+      console.error(chalk.red(`Failed to write malware matches to output file: ${e instanceof Error ? e.message : String(e)}`));
     }
   }
 
@@ -207,12 +261,11 @@ async function main() {
     } else {
       // Fallback to inquirer if not a TTY
       for (; ;) {
-        const ans = await inquirer.prompt<{ purls: string }>([
-          { name: "purls", message: "Enter comma-separated PURLs (blank to exit)", type: "input" }
+        const ans = await inquirer.prompt<{ purl: string }>([
+          { name: "purl", message: "Enter a PURL (blank to exit)", type: "input" }
         ]);
-        if (!ans.purls) break;
-        const list = ans.purls.split(/[\s,]+/).filter(Boolean);
-        runSearch(list);
+        if (!ans.purl) break;
+        runSearch([ans.purl]);
       }
     }
   }

@@ -2,17 +2,19 @@
 
 Enumerate Dependency Graph SBOMs from all repositories in a GitHub Enterprise (all orgs) or a single organization.
 
-Search collected SBOMs by PURL, save all results to disk, sync malware security advisories, and match SBOM packages against those advisories.
+Search collected SBOMs by PURL, cache them for offline analysis, sync malware security advisories, and match SBOM packages against those advisories. Supports human-readable and JSON output with file output for JSON.
 
 ## Features
 
 - Enumerate orgs in an Enterprise and repos in each org
 - Fetch SBOM per repo with concurrency + optional delay and retry/throttle handling
-- Search for packages by exact PURL or prefix (use trailing `/*`)
-- Serialize/load SBOMs to/from JSON files
+- Search for packages by exact PURL, semver/range, or wildcard (trailing `/*` after the package name path segment)
+- Cache SBOMs in a single directory (JSON per repository) with offline re-use
 - Sync malware security advisories from the GitHub Advisory Database
 - Version-aware matching of SBOM packages vs. malware advisories
 - Works with GitHub.com, GitHub Enterprise Server, GitHub Enterprise Managed Users and GitHub Enterprise Cloud with Data Residency (custom base URL)
+- Reason tracing: every search match shows which query matched; every malware match shows which advisory triggered it
+- Interactive REPL for ad‑hoc PURL queries (history, graceful Ctrl+C handling)
 
 ## Auth Requirements
 
@@ -20,35 +22,101 @@ Token needs scopes: `repo`, `read:org`, and `security_events` (for dependency gr
 
 ## Usage
 
-Example:
+### Quick Start
+
+Collect SBOMs for all repositories in an organization (writes JSON files into `sboms/`) then perform a PURL search:
 
 ```bash
-node dist/cli.js --enterprise my-enterprise --out sboms --purl pkg:npm/lodash@4.17.21
+node dist/cli.js --sync-sboms --org my-org --sbom-cache sboms --purl pkg:npm/lodash@4.17.21
 ```
 
-Search multiple purls:
+Search multiple PURLs (exact, wildcard, and a semver range). The `pkg:` prefix is optional; it will be auto-added:
 
 ```bash
-node dist/cli.js --org my-org --purl pkg:npm/react@18.2.0 --purl 'pkg:npm/express/*'
+node dist/cli.js --sbom-cache sboms \
+  --purl npm/react@18.2.0 \
+  --purl 'npm/express/*' \
+  --purl 'npm/chalk@>=5.0.0 <6.0.0'
 ```
 
 Using GitHub Enterprise Server:
 
 ```bash
-node dist/cli.js --enterprise ent --base-url https://github.internal/api/v3 --token $GHES_TOKEN
+node dist/cli.js --sync-sboms --enterprise ent \
+  --base-url https://github.internal/api/v3 \
+  --sbom-cache sboms --token $GHES_TOKEN
 ```
 
-Sync malware advisories and run match (after collecting SBOMs):
+### SBOM Caching Workflow
+
+1. First collection (populates cache):
 
 ```bash
-node dist/cli.js --org my-org --sync-malware --match-malware --malware-cache malware-cache
+node dist/cli.js --sync-sboms --org my-org --sbom-cache sboms
 ```
 
-Load previously serialized SBOMs and just perform malware match (no new SBOM calls):
+1. Later offline search (no API calls):
 
 ```bash
-node dist/cli.js --load sboms --sync-malware --match-malware --malware-cache malware-cache
+node dist/cli.js --sbom-cache sboms --purl pkg:npm/react@18.2.0
 ```
+
+### Malware Advisory Sync & Matching
+
+Sync malware advisories and then match against SBOM packages in one run:
+
+```bash
+node dist/cli.js \
+  --sync-sboms --org my-org --sbom-cache sboms \
+  --sync-malware --malware-cache malware-cache --match-malware
+```
+
+Use already cached SBOMs (offline) while updating advisories:
+
+```bash
+node dist/cli.js --sbom-cache sboms --sync-malware --malware-cache malware-cache --match-malware
+```
+
+Offline match with already-cached malware advisories (no network calls):
+
+```bash
+node dist/cli.js --sbom-cache sboms --malware-cache malware-cache --match-malware
+```
+
+Write malware matches (and optionally search results later) to a JSON file using `--output-file`:
+
+```bash
+node dist/cli.js --sbom-cache sboms --malware-cache malware-cache --match-malware --output-file report.json
+```
+
+If you also perform a search in the same invocation (add `--purl` or `--purl-file`), the JSON file will contain both `malwareMatches` and `search` top-level keys.
+
+### Output Modes (Search Results)
+
+JSON only to stdout:
+
+```bash
+node dist/cli.js --sbom-cache sboms --purl pkg:npm/chalk@5.6.1 --json
+```
+
+Human + JSON (JSON written to file; stdout remains readable):
+
+```bash
+node dist/cli.js --sbom-cache sboms --purl pkg:npm/chalk@5.6.1 \
+  --json --cli --output-file search-results.json
+```
+
+If you specify `--cli --json`, you must also supply `--output-file` to avoid corrupted mixed stdout.
+
+### Interactive Mode
+
+Enter an interactive prompt (arrow key history, Ctrl+C handling) after initial collection/load:
+
+```bash
+node dist/cli.js --sbom-cache sboms --interactive
+```
+
+Then type one PURL query per line. Entering a blank line or using Ctrl+C on a blank line exits. Ctrl+C on a non-blank line clears the line.
 
 ### Offline Fixture Test
 
@@ -74,34 +142,35 @@ Matches:
 chalk-org/chalk-repo => pkg:npm/chalk@5.6.1 matched advisory GHSA-test-chalk-561 range =5.6.1
 ```
 
-Alternatively, you can exercise the CLI purely offline using the fixtures:
+Alternatively, you can exercise the CLI purely offline using the fixtures (no token required):
 
 ```bash
-node dist/cli.js --load fixtures/sboms --malware-cache fixtures/malware-cache --match-malware
+node dist/cli.js --sbom-cache fixtures/sboms --malware-cache fixtures/malware-cache --match-malware
 ```
-
-No token is required for purely offline use, where the SBOMs and malware cache are preloaded from disk.
 
 ### Incremental Mode
 
-Skip re-fetching SBOMs for repositories whose `pushed_at` timestamp has not advanced since a previous run.
+Skip re-fetching SBOMs for repositories whose `pushed_at` timestamp has not advanced vs. a baseline cache.
 
-1. First collection (also serialize SBOMs):
-
-```bash
-node dist/cli.js --org my-org --out sboms
-```
-
-1. Subsequent incremental run comparing to previous baseline:
+1. Initial cache:
 
 ```bash
-node dist/cli.js --org my-org --out sboms --baseline sboms --incremental
+node dist/cli.js --sync-sboms --org my-org --sbom-cache sboms
 ```
 
-Summary output will include `Skipped: <n>` showing how many repos reused the baseline SBOM.
+1. Incremental refresh (re-uses existing JSON for unchanged repos, overwriting updated ones):
 
-- A push to any branch updates `pushed_at`, which may cause a fetch even if the default branch is unchanged
-- Future enhancement: store ETag and use conditional requests, or fetch default branch HEAD SHA
+```bash
+node dist/cli.js --sync-sboms --org my-org \
+  --sbom-cache sboms --baseline sboms --incremental
+```
+
+Summary output includes `Skipped: <n>` for reused repositories.
+
+Notes:
+
+- Any push to any branch updates `pushed_at` and will trigger a re-fetch even if default branch content didn’t change.
+- Future enhancement: conditional requests (ETag) or default branch commit SHA comparison for finer granularity.
 
 ## Build
 
@@ -128,15 +197,60 @@ pkg:npm/chalk@^5.0.0
 # Version range (inequalities)
 pkg:npm/chalk@>=5.0.0 <6.0.0
 
-Run with:
-
-```bash
-node dist/cli.js --load sboms --purl-file queries.txt
 ```
 
-### Rate limiting
+Run with (offline):
 
-- Rate limiting and secondary limits are automatically retried (up to 2 times)
+```bash
+node dist/cli.js --sbom-cache sboms --purl-file queries.txt
+```
+
+Or (fresh sync + file-based queries):
+
+```bash
+node dist/cli.js --sync-sboms --org my-org --sbom-cache sboms --purl-file queries.txt
+```
+
+### Flag Overview (Common)
+
+| Flag | Purpose |
+|------|---------|
+| `--sbom-cache <dir>` | Directory holding per-repo SBOM JSON files (required for offline mode; used as write target when syncing) |
+| `--sync-sboms` | Perform API calls to (re)collect SBOMs; without it the CLI runs offline loading cached SBOMs |
+| `--enterprise <slug>` / `--org <login>` | Scope selection (mutually exclusive when syncing) |
+| `--baseline <dir>` | Prior SBOM directory for incremental comparison |
+| `--incremental` | Skip SBOMs whose `pushed_at` unchanged vs baseline |
+| `--purl <purl>` | Add a PURL/range/wildcard query (repeatable) |
+| `--purl-file <file>` | File with one query per line |
+| `--json` | Emit search JSON to stdout (unless overridden by `--output-file`) |
+| `--cli` | Also emit human-readable output when producing JSON (requires `--output-file`) |
+| `--output-file <file>` | Write search JSON payload to file; required when using both `--json` and `--cli` |
+| `--interactive` | Enter interactive search prompt after initial processing |
+| `--sync-malware` | Fetch & cache malware advisories (MALWARE classification) |
+| `--match-malware` | Match current SBOM set against cached advisories |
+| `--malware-cache <dir>` | Advisory cache directory (required with malware operations) |
+| `--concurrency <n>` | Parallel SBOM fetches (default 5) |
+| `--delay <ms>` | Delay between repository SBOM requests |
+| `--base-url <url>` | GitHub Enterprise Server REST base URL (ends with /api/v3) |
+
+### Reason Tracing
+
+Output lines append a reason context:
+
+- Search matches: `{query: <original query string>}`
+- Malware matches: `{advisory: <GHSA-ID>}`
+
+This makes it clear which input (user query or specific advisory) caused each result.
+
+### Rate Limiting & Retries
+
+- Standard & secondary rate limits automatically retried (up to 2 times)
+- You may tune concurrency and add delay where strict throttling required
+
+### Authentication Notes
+
+- A token is only required when performing network operations (`--sync-sboms` and/or `--sync-malware`).
+- Offline operations (pure searches, matches using pre-cached data) need no token.
 
 ## License
 
