@@ -102,7 +102,7 @@ async function main() {
 
   if (argv["sync-malware"]) {
 
-    console.log(chalk.cyan("Syncing malware advisories..."));
+    console.log(chalk.cyan("Syncing malware advisories from GitHub Advisory Database..."));
 
     const { added, updated, total } = await mas.sync();
     console.log(chalk.green(`Malware advisories sync complete. Added: ${added}, Updated: ${updated}, Total cached: ${total}`));
