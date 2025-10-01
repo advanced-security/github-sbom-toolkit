@@ -10,11 +10,12 @@ export interface OctokitFactoryOptions {
   baseUrl?: string; // GitHub Enterprise Server URL (no trailing slash)
   userAgentExtra?: string;
   suppressSecondaryRateLimitLogs?: boolean;
+  onSecondaryRateLimitHit?: (retryAfterSeconds: number) => void; // callback hook
 }
 
 const MyOctokit = Octokit.plugin(paginateRest, restEndpointMethods, throttling, retry);
 
-export function createOctokit({ token, baseUrl, userAgentExtra, suppressSecondaryRateLimitLogs }: OctokitFactoryOptions) {
+export function createOctokit({ token, baseUrl, userAgentExtra, suppressSecondaryRateLimitLogs, onSecondaryRateLimitHit }: OctokitFactoryOptions) {
   const normalizedBase = baseUrl?.replace(/\/$/, "");
   return new MyOctokit({
     auth: token,
@@ -37,6 +38,7 @@ export function createOctokit({ token, baseUrl, userAgentExtra, suppressSecondar
         if (!suppressSecondaryRateLimitLogs) {
           console.warn(chalk.grey(`Secondary rate limit hit. Pausing for ${retryAfter}s.`));
         }
+        try { onSecondaryRateLimitHit?.(retryAfter); } catch { /* swallow callback errors */ }
         await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
         return true;
       }

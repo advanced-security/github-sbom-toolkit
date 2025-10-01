@@ -16,6 +16,7 @@ export interface CollectorOptions {
   concurrency?: number; // parallel repo SBOM fetches
   includePrivate?: boolean;
   delayMsBetweenRepos?: number;
+  lightDelayMs?: number; // delay for lightweight (non-SBOM) requests
   loadFromDir?: string; // optional pre-existing serialized SBOM directory
   syncSboms?: boolean; // if true, fetch SBOMs from GitHub (requires token)
   autoEnableDependencyGraph?: boolean; // attempt to enable Dependency Graph if disabled
@@ -39,7 +40,8 @@ export class SbomCollector {
     this.opts = {
       concurrency: 5,
       includePrivate: true,
-      delayMsBetweenRepos: 0,
+      delayMsBetweenRepos: options.delayMsBetweenRepos ?? 5000,
+      lightDelayMs: options.lightDelayMs ?? 500,
       baseUrl: options.baseUrl ?? undefined,
       autoEnableDependencyGraph: true,
       loadFromDir: options.loadFromDir ?? undefined,
@@ -51,7 +53,20 @@ export class SbomCollector {
     } as Required<CollectorOptions>;
 
     if (this.opts.token) {
-      this.octokit = createOctokit({ token: this.opts.token, baseUrl: this.opts.baseUrl, suppressSecondaryRateLimitLogs: this.opts.suppressSecondaryRateLimitLogs || this.opts.quiet });
+      this.octokit = createOctokit({
+        token: this.opts.token,
+        baseUrl: this.opts.baseUrl,
+        suppressSecondaryRateLimitLogs: this.opts.suppressSecondaryRateLimitLogs || this.opts.quiet,
+        onSecondaryRateLimitHit: () => {
+          // Increase SBOM delay (delayMsBetweenRepos) by 10% each time to reduce pressure.
+          const oldDelay = this.opts.delayMsBetweenRepos;
+            const newDelay = Math.ceil(oldDelay * 1.1 + 1);
+            this.opts.delayMsBetweenRepos = newDelay as unknown as typeof this.opts.delayMsBetweenRepos;
+            if (!this.opts.quiet) {
+              console.warn(chalk.yellow(`Adaptive backoff: increased SBOM delay from ${oldDelay}ms to ${newDelay}ms after secondary rate limit.`));
+            }
+        }
+      });
     }
 
     this.summary = {
@@ -117,6 +132,7 @@ export class SbomCollector {
     let totalRepos = 0;
     for (const org of orgs) {
   if (!this.opts.quiet) console.log(chalk.blue(`Listing repositories for org ${org}`));
+      if (this.opts.lightDelayMs) await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
       const repos = await this.listOrgRepos(org);
       orgRepoMap[org] = repos;
       totalRepos += repos.length;
@@ -151,9 +167,6 @@ export class SbomCollector {
       let newSboms: RepositorySbom[] = [];
 
       const tasks = repos.map(repo => limit(async () => {
-        if (this.opts.delayMsBetweenRepos) {
-          await new Promise(r => setTimeout(r, this.opts.delayMsBetweenRepos));
-        }
         const fullName = `${org}/${repo.name}`;
         const baseline = this.baselineMap.get(fullName.toLowerCase());
         let skipped = false;
@@ -170,6 +183,7 @@ export class SbomCollector {
               // There have been pushes; refine by checking default branch head commit date
               if (repo.default_branch) {
                 try {
+                  if (this.opts.lightDelayMs) await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
                   const commitResp = await this.octokit!.request("GET /repos/{owner}/{repo}/commits/{ref}", { owner: org, repo: repo.name, ref: repo.default_branch });
                   const commit = commitResp.data as { sha?: string; commit?: { author?: { date?: string }; committer?: { date?: string } } };
                   const commitDate = commit.commit?.committer?.date || commit.commit?.author?.date;
@@ -204,6 +218,9 @@ export class SbomCollector {
         }
         if (!skipped) {
           const res = await this.fetchSbom(org, repo.name, repo);
+          if (this.opts.delayMsBetweenRepos) {
+            await new Promise(r => setTimeout(r, this.opts.delayMsBetweenRepos));
+          }
           if (pendingCommitMeta) {
             res.defaultBranchCommitSha = pendingCommitMeta.sha;
             res.defaultBranchCommitDate = pendingCommitMeta.date;

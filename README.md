@@ -21,6 +21,7 @@ Search collected SBOMs by PURL, cache them for offline analysis, sync malware se
 - Option to suppress secondary rate limit warnings (prevents breaking the progress bar display)
 - Quiet mode to suppress non-error console output while retaining progress bar, human readable results and machine-readable JSON
 - Intelligent skip logic: if the repository was pushed to, but the default branch head commit date isn't newer than the prior SBOM retrieval, the existing cached SBOM is reused
+- Adaptive backoff: each secondary rate limit hit increases the SBOM fetch delay by 10% to reduce future throttling
 
 ## Auth Requirements
 
@@ -258,7 +259,8 @@ node dist/cli.js --sync-sboms --org my-org --sbom-cache sboms --purl-file querie
 | `--sarif-dir <dir>` | Write SARIF 2.1.0 files per repository (with malware matches) |
 | `--upload-sarif` | Upload generated SARIF to Code Scanning (requires --match-malware & --sarif-dir and a GitHub token) |
 | `--concurrency <n>` | Parallel SBOM fetches (default 5) |
-| `--delay <ms>` | Delay between repository SBOM requests |
+| `--sbom-delay <ms>` | Delay between SBOM fetch (dependency-graph/sbom) requests (default 5000) |
+| `--light-delay <ms>` | Delay between lightweight metadata calls (listing repos, commit head checks) (default 500) |
 | `--base-url <url>` | GitHub Enterprise Server REST base URL (ends with /api/v3) |
 | `--progress` | Show a dynamic progress bar during SBOM collection |
 | `--suppress-secondary-rate-limit-logs` | Hide secondary rate limit warning lines (useful with `--progress`) |
