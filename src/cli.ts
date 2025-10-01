@@ -88,7 +88,7 @@ async function main() {
     baselineDir: argv.baseline as string | undefined
   });
 
-  console.log(chalk.cyan(offline ? "Loading SBOMs from cache..." : "Collecting SBOMs from API..."));
+  console.log(chalk.cyan(offline ? "Loading SBOMs from cache..." : "Collecting SBOMs from GitHub..."));
   const sboms = await collector.collect();
   const summary = collector.getSummary();
   console.log(chalk.green(`Done. Success: ${summary.successCount} / ${summary.repositoryCount}. Failed: ${summary.failedCount}. Skipped: ${summary.skippedCount}`));
