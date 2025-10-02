@@ -35,8 +35,9 @@ async function main() {
     .option("purl-file", { type: "string", describe: "Path to file with PURL queries (one per line; supports version ranges & wildcards; # or // for comments)" })
     .option("json", { type: "boolean", describe: "Emit search results as JSON to stdout (suppresses human output unless --cli also provided)" })
     .option("cli", { type: "boolean", describe: "When used with --json, also emit human-readable CLI output" })
-    .option("output-file", { type: "string", describe: "Write search JSON output to this file (implied JSON generation). Required when using --cli with JSON." })
+    .option("output-file", { type: "string", describe: "Write search JSON/CSV output to this file. Required when using --cli with JSON/CSV." })
     .option("csv", { type: "boolean", describe: "Emit results (search + malware matches) as CSV" })
+    .option("ignore-file", { type: "string", describe: "Path to YAML ignore file (advisories, purls, scoped ignores)" })
     .check(args => {
       const syncing = !!args.syncSboms;
       if (syncing) {
@@ -61,6 +62,9 @@ async function main() {
       }
       if (args.uploadSarif && !args.sarifDir) {
         throw new Error("--upload-sarif requires --sarif-dir to write SARIF files prior to upload.");
+      }
+      if (args.csv && args.json) {
+        throw new Error("Use one of --json or --csv")
       }
       return true;
     })
@@ -120,6 +124,25 @@ async function main() {
   if (argv["match-malware"]) {
     const { matchMalware, buildSarifPerRepo, writeSarifFiles, uploadSarifPerRepo } = await import("./malwareMatcher.js");
     malwareMatches = matchMalware(mas.getAdvisories(), sboms, { advisoryDateCutoff: argv["malware-cutoff"] as string | undefined });
+    // Apply ignore file if provided
+    if (argv["ignore-file"] && malwareMatches?.length) {
+      try {
+        const { IgnoreMatcher } = await import("./ignore.js");
+        const matcher = IgnoreMatcher.load(argv["ignore-file"] as string, {});
+        if (matcher) {
+          const { kept, ignored } = matcher.filter(malwareMatches);
+          if (!argv.quiet) {
+            console.log(chalk.yellow(`Ignored ${ignored.length} malware match(es) via ignore file; ${kept.length} remaining.`));
+          }
+          malwareMatches = kept;
+          // If writing SARIF we intentionally only report kept matches; optionally we could emit a log of ignored reasons.
+        } else if (!argv.quiet) {
+          console.log(chalk.yellow(`Ignore file '${argv["ignore-file"]}' not found or failed to parse; proceeding without filtering.`));
+        }
+      } catch (e) {
+        console.error(chalk.red(`Failed applying ignore file: ${(e as Error).message}`));
+      }
+    }
     if (!quiet) console.log(chalk.magenta(`Malware matches found: ${malwareMatches?.length ?? 0}`));
     if (malwareMatches) {
       if (!quiet) {
@@ -179,9 +202,8 @@ async function main() {
   const combinedPurlsRaw = [...(argv.purl as string[] ?? []), ...filePurls];
   const combinedPurls = combinedPurlsRaw.map(p => p.startsWith("pkg:") ? p : `pkg:${p}`);
   if (combinedPurls.length) {
-    const needJson = argv.json || argv.outputFile;
     // We'll also consider CSV export after JSON handling
-    if (needJson) {
+    if (argv.json || argv.outputFile) {
       const map = collector.searchByPurlsWithReasons(combinedPurls);
       const jsonSearch = Array.from(map.entries()).map(([repo, entries]) => ({ repo, matches: entries }));
       if (argv.outputFile) {
@@ -200,13 +222,13 @@ async function main() {
           console.error(chalk.red(`Failed to write output file: ${e instanceof Error ? e.message : String(e)}`));
           process.exit(1);
         }
-      } else if (argv.json) {
+      } else {
         const payloadObj: { search: unknown; malwareMatches?: import("./malwareMatcher.js").MalwareMatch[] } = { search: jsonSearch };
         if (malwareMatches) payloadObj.malwareMatches = malwareMatches;
         process.stdout.write(JSON.stringify(payloadObj, null, 2) + "\n");
       }
       // If CLI output requested (either implicit because no --json OR explicit --cli with output-file requirement) then show human form
-      if (!needJson || (argv.cli && needJson)) {
+      if (((!argv.json && !argv.csv) && !argv.outputFile) || (argv.cli && (argv.json || argv.outputFile))) {
         runSearch(combinedPurls);
       } else if (argv.cli) { // This branch only occurs when validation prevented missing output-file
         runSearch(combinedPurls);

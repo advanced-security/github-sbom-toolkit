@@ -14,6 +14,7 @@ Search collected SBOMs by PURL, cache them for offline analysis, sync malware se
 - Sync malware security advisories from the GitHub Advisory Database
 - Version-aware matching of SBOM packages vs. malware advisories
 - Optional SARIF 2.1.0 output per repository for malware matches with optional Code Scanning upload
+- YAML ignore file support to suppress specific advisory IDs or PURLs globally or scoped to an org / repo
 - Works with GitHub.com, GitHub Enterprise Server, GitHub Enterprise Managed Users and GitHub Enterprise Cloud with Data Residency (custom base URL)
 - Reason tracing: every search match shows which query matched; every malware match shows which advisory triggered it
 - Interactive REPL for ad‑hoc PURL queries (history, graceful Ctrl+C handling)
@@ -68,6 +69,7 @@ npm run start -- --sync-sboms --enterprise ent --base-url https://github.interna
 | `--match-malware` | Match current SBOM set against cached advisories |
 | `--malware-cache <dir>` | Advisory cache directory (required with malware operations) |
 | `--malware-cutoff <ISO-date>` | Ignore advisories whose publishedAt AND updatedAt are both before this date/time (e.g. `2025-09-29` or full timestamp) |
+| `--ignore-file <path>` | YAML ignore file (advisories / purls / scoped blocks) to filter malware matches before output |
 | `--sarif-dir <dir>` | Write SARIF 2.1.0 files per repository (with malware matches) |
 | `--upload-sarif` | Upload generated SARIF to Code Scanning (requires --match-malware & --sarif-dir and a GitHub token) |
 | `--concurrency <n>` | Parallel SBOM fetches (default 5) |
@@ -144,6 +146,37 @@ npm run start -- --sbom-cache sboms --malware-cache malware-cache --match-malwar
 ```
 
 If you also perform a search in the same invocation (add `--purl` or `--purl-file`), the JSON file will contain both `malwareMatches` and `search` top-level keys.
+
+#### Ignoring Matches
+
+Provide a YAML ignore file via `--ignore-file` to suppress specific matches (before SARIF generation / JSON output). Structure:
+
+```yaml
+# Ignore specific advisory IDs everywhere
+advisories:
+  - GHSA-aaaa-bbbb-cccc
+
+# Ignore by PURL (optional semver/range component after @). If version/range omitted, all versions are ignored.
+purls:
+  - pkg:npm/lodash               # any version
+  - pkg:npm/react@>=18.0.0 <18.3.0
+
+# Scoped ignores (org OR org/repo). Applied only within those scopes.
+scoped:
+  - scope: my-org
+    advisories: [GHSA-1111-2222-3333]
+  - scope: my-org/my-repo
+    purls:
+      - pkg:maven/com.example/app@1.2.3
+```
+
+Rules precedence:
+
+1. Scoped repo block
+2. Scoped org block
+3. Global advisories / purls
+
+The first matching rule suppresses the finding; output logs will show how many were ignored. Ignored items are fully removed from SARIF and JSON/CSV outputs.
 
 #### Advisory Date Cutoff
 

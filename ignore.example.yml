@@ -1,0 +1,22 @@
+# Example ignore file for github-sbom-toolkit malware matches
+# Copy to e.g. sbom-ignore.yml and pass with --ignore-file sbom-ignore.yml
+
+advisories:
+  # Ignore these advisory IDs globally (all repos)
+  - GHSA-AAAA-BBBB-CCCC
+
+purls:
+  # Ignore any version of lodash
+  - pkg:npm/lodash
+  # Ignore only these React versions (range semantics via semver)
+  - pkg:npm/react@>=18.0.0 <18.3.0
+
+scoped:
+  # Ignore an advisory across an entire org
+  - scope: my-org
+    advisories:
+      - GHSA-1111-2222-3333
+  # Ignore one specific PURL (exact version) in a single repository
+  - scope: my-org/my-repo
+    purls:
+      - pkg:maven/com.example/app@1.2.3
