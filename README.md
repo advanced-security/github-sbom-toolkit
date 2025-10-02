@@ -67,6 +67,7 @@ npm run start -- --sync-sboms --enterprise ent --base-url https://github.interna
 | `--sync-malware` | Fetch & cache malware advisories (MALWARE classification). Requires a GitHub token |
 | `--match-malware` | Match current SBOM set against cached advisories |
 | `--malware-cache <dir>` | Advisory cache directory (required with malware operations) |
+| `--malware-cutoff <ISO-date>` | Ignore advisories whose publishedAt AND updatedAt are both before this date/time (e.g. `2025-09-29` or full timestamp) |
 | `--sarif-dir <dir>` | Write SARIF 2.1.0 files per repository (with malware matches) |
 | `--upload-sarif` | Upload generated SARIF to Code Scanning (requires --match-malware & --sarif-dir and a GitHub token) |
 | `--concurrency <n>` | Parallel SBOM fetches (default 5) |
@@ -143,6 +144,27 @@ npm run start -- --sbom-cache sboms --malware-cache malware-cache --match-malwar
 ```
 
 If you also perform a search in the same invocation (add `--purl` or `--purl-file`), the JSON file will contain both `malwareMatches` and `search` top-level keys.
+
+#### Advisory Date Cutoff
+
+Use `--malware-cutoff` to exclude older advisories from matching. An advisory will be skipped if **both** its `publishedAt` and `updatedAt` timestamps are strictly earlier than the cutoff.
+
+Accepted formats:
+
+- Plain date: `YYYY-MM-DD` (interpreted as `YYYY-MM-DDT00:00:00.000Z`)
+- Full ISO timestamp: e.g. `2025-09-29T15:30:00Z`
+
+Examples:
+
+```bash
+# Ignore advisories published & last updated entirely before Sept 29 2025
+npm run start -- --sbom-cache sboms --malware-cache malware-cache --match-malware --malware-cutoff 2025-09-29
+
+# Using a precise timestamp (keep advisories updated later that day UTC)
+npm run start -- --sbom-cache sboms --malware-cache malware-cache --match-malware --malware-cutoff 2025-09-29T12:00:00Z
+```
+
+Rationale: This lets you focus on newly introduced / recently changed malware advisories (e.g., during incremental monitoring) without re-reporting older historical matches. Advisories updated after the cutoff remain eligible even if originally published earlier.
 
 ### Progress bar & log noise suppression
 

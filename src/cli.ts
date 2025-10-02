@@ -31,6 +31,7 @@ async function main() {
     .option("match-malware", { type: "boolean", default: false, describe: "After sync/load, match SBOM packages against malware advisories" })
     .option("sarif-dir", { type: "string", describe: "Directory to write SARIF 2.1.0 files (one per repository) when --match-malware is used" })
     .option("upload-sarif", { type: "boolean", default: false, describe: "Upload generated SARIF (per-repo) to the Code Scanning API (requires --match-malware)" })
+    .option("malware-cutoff", { type: "string", describe: "Ignore advisories whose publishedAt and updatedAt are both before this ISO date (e.g. 2025-09-29)" })
     .option("purl-file", { type: "string", describe: "Path to file with PURL queries (one per line; supports version ranges & wildcards; # or // for comments)" })
     .option("json", { type: "boolean", describe: "Emit search results as JSON to stdout (suppresses human output unless --cli also provided)" })
     .option("cli", { type: "boolean", describe: "When used with --json, also emit human-readable CLI output" })
@@ -45,7 +46,7 @@ async function main() {
         if (!args.sbomCache) throw new Error("Offline mode requires --sbom-cache (omit --sync-sboms)");
       }
       // If --cli is specified in combination with JSON or CSV, require an output file to avoid mixed stdout streams.
-      if (args.cli && !args.outputFile && ( args.json || args.csv ) ) {
+      if (args.cli && !args.outputFile && (args.json || args.csv)) {
         throw new Error("--cli with --json or --csv requires --output-file to avoid interleaving JSON and human output on stdout.");
       }
       // check that --malware-cache is provided
@@ -118,7 +119,7 @@ async function main() {
   let malwareMatches: import("./malwareMatcher.js").MalwareMatch[] | undefined;
   if (argv["match-malware"]) {
     const { matchMalware, buildSarifPerRepo, writeSarifFiles, uploadSarifPerRepo } = await import("./malwareMatcher.js");
-    malwareMatches = matchMalware(mas.getAdvisories(), sboms);
+    malwareMatches = matchMalware(mas.getAdvisories(), sboms, { advisoryDateCutoff: argv["malware-cutoff"] as string | undefined });
     if (!quiet) console.log(chalk.magenta(`Malware matches found: ${malwareMatches?.length ?? 0}`));
     if (malwareMatches) {
       if (!quiet) {
@@ -220,7 +221,7 @@ async function main() {
   if (argv.csv) {
     const fs = await import("fs");
     // Collect search data if searches were run; reconstruct from collector if we have combinedPurls
-    let searchRows: Array<{ repo: string; purl: string; reason: string }> = [];
+    const searchRows: Array<{ repo: string; purl: string; reason: string }> = [];
     if (combinedPurls.length) {
       const map = collector.searchByPurlsWithReasons(combinedPurls);
       for (const [repo, entries] of map.entries()) {
@@ -236,7 +237,7 @@ async function main() {
       }
     }
     // CSV columns: type,repo,purl,reason_or_advisory,range,updatedAt
-    const header = ["type","repo","purl","reason_or_advisory","range","updatedAt"];
+    const header = ["type", "repo", "purl", "reason_or_advisory", "range", "updatedAt"];
     const sanitize = (val: unknown): string => {
       if (val === null || val === undefined) return "";
       let s = String(val);
