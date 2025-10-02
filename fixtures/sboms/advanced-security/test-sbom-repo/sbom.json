@@ -1,0 +1,73 @@
+{
+  "repo": "advanced-security/test-sbom-repo",
+  "org": "advanced-security",
+  "enterprise": "test-ent",
+  "retrievedAt": "2025-09-29T12:00:00.000Z",
+  "sbom": {
+    "sbom": {
+      "spdxVersion": "SPDX-2.3",
+      "dataLicense": "CC0-1.0",
+      "SPDXID": "SPDXRef-DOCUMENT",
+      "name": "com.github.advanced-security-demo/acc-ghas-training",
+      "documentNamespace": "https://spdx.org/spdxdocs/protobom/ab13fa76-9d0d-4e97-be3b-fe4a9e46a815",
+      "creationInfo": {
+        "creators": [
+          "Tool: GitHub.com-Dependency-Graph"
+        ],
+        "created": "2025-09-28T19:12:31Z"
+      },
+      "packages": [
+        {
+          "name": "chalk",
+          "SPDXID": "SPDXRef-npm-chalk-5.6.1",
+          "version": "5.6.1",
+          "externalRefs": [
+            {
+              "referenceCategory": "PACKAGE-MANAGER",
+              "referenceType": "purl",
+              "referenceLocator": "pkg:npm/chalk@5.6.1"
+            }
+          ]
+        },
+        {
+          "name": "left-pad",
+          "SPDXID": "SPDXRef-npm-left-pad-1.3.0",
+          "version": "1.3.0",
+          "externalRefs": [
+            {
+              "referenceCategory": "PACKAGE-MANAGER",
+              "referenceType": "purl",
+              "referenceLocator": "pkg:npm/left-pad@1.3.0"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "packages": [
+    {
+      "name": "chalk",
+      "SPDXID": "SPDXRef-npm-chalk-5.6.1",
+      "version": "5.6.1",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/chalk@5.6.1"
+        }
+      ]
+    },
+    {
+      "name": "left-pad",
+      "SPDXID": "SPDXRef-npm-left-pad-1.3.0",
+      "version": "1.3.0",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/left-pad@1.3.0"
+        }
+      ]
+    }
+  ]
+}
