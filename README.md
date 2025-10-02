@@ -9,17 +9,16 @@ Search collected SBOMs by PURL, cache them for offline analysis, sync malware se
 - Enumerate orgs in an Enterprise and repos in each org
 - Fetch SBOM per repo with concurrency + optional delay and retry/throttle handling
 - Search for packages by exact PURL, semver/range, or wildcard (trailing `/*` after the package name path segment)
-- Cache SBOMs in a single directory (JSON per repository) with offline re-use
-  - SBOMs are now written incrementally as each repository is fetched (no need to wait for the entire run)
+- Cache SBOMs in a directory (one file per repository)
+  - SBOMs are written incrementally to allow for stopping and resuming
 - Sync malware security advisories from the GitHub Advisory Database
 - Version-aware matching of SBOM packages vs. malware advisories
 - Optional SARIF 2.1.0 output per repository for malware matches with optional Code Scanning upload
 - Works with GitHub.com, GitHub Enterprise Server, GitHub Enterprise Managed Users and GitHub Enterprise Cloud with Data Residency (custom base URL)
 - Reason tracing: every search match shows which query matched; every malware match shows which advisory triggered it
 - Interactive REPL for ad‑hoc PURL queries (history, graceful Ctrl+C handling)
-- Optional progress bar while fetching SBOMs (suppresses normal per‑org logging)
-- Option to suppress secondary rate limit warnings (prevents breaking the progress bar display)
-- Quiet mode to suppress non-error console output while retaining progress bar, human readable results and machine-readable JSON
+- Optional progress bar while fetching SBOMs
+- Option to suppress secondary rate limit warnings, and full quiet mode to suppress non-error console output while retaining progress bar, human readable results and machine-readable JSON
 - Intelligent skip logic: if the repository was pushed to, but the default branch head commit date isn't newer than the prior SBOM retrieval, the existing cached SBOM is reused
 - Adaptive backoff: each secondary rate limit hit increases the SBOM fetch delay by 10% to reduce future throttling
 
