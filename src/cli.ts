@@ -69,7 +69,8 @@ async function main() {
 
   const token = argv.token as string | undefined || process.env.GITHUB_TOKEN;
 
-  if (argv.sbom || argv["sync-malware"] || argv.uploadSarif) {
+  // Require a token for any network operation (syncing SBOMs, malware advisories, or SARIF upload)
+  if (argv.syncSboms || argv["sync-malware"] || argv.uploadSarif) {
     if (!token) {
       console.error(chalk.red("GitHub token must be provided via --token or GITHUB_TOKEN environment variable"));
       process.exit(1);

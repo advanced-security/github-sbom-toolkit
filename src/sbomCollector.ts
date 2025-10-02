@@ -26,7 +26,7 @@ export interface CollectorOptions {
 }
 
 export class SbomCollector {
-  private octokit; // typed by Octokit instance
+  private octokit: ReturnType<typeof createOctokit> | undefined; // explicit type
   private opts: Required<CollectorOptions>;
   private sboms: RepositorySbom[] = [];
   private summary: CollectionSummary;
@@ -37,19 +37,24 @@ export class SbomCollector {
     if (!options.loadFromDir && !options.enterprise && !options.org) {
       throw new Error("Either enterprise/org or loadFromDir must be specified");
     }
+    // Spread user options first then apply defaults via nullish coalescing so that
+    // passing undefined does not erase defaults
+    const o = { ...options };
     this.opts = {
-      concurrency: 5,
-      includePrivate: true,
-      delayMsBetweenRepos: options.delayMsBetweenRepos ?? 5000,
-      lightDelayMs: options.lightDelayMs ?? 500,
-      baseUrl: options.baseUrl ?? undefined,
-      autoEnableDependencyGraph: true,
-      loadFromDir: options.loadFromDir ?? undefined,
-      syncSboms: options.syncSboms ?? false,
-      showProgressBar: options.showProgressBar ?? false,
-      suppressSecondaryRateLimitLogs: options.suppressSecondaryRateLimitLogs ?? false,
-      quiet: options.quiet ?? false,
-      ...options
+      token: o.token,
+      enterprise: o.enterprise,
+      org: o.org,
+      baseUrl: o.baseUrl,
+      concurrency: o.concurrency ?? 5,
+      includePrivate: o.includePrivate ?? true,
+      delayMsBetweenRepos: o.delayMsBetweenRepos ?? 5000,
+      lightDelayMs: o.lightDelayMs ?? 500,
+      loadFromDir: o.loadFromDir,
+      syncSboms: o.syncSboms ?? false,
+      autoEnableDependencyGraph: o.autoEnableDependencyGraph ?? true,
+      showProgressBar: o.showProgressBar ?? false,
+      suppressSecondaryRateLimitLogs: o.suppressSecondaryRateLimitLogs ?? false,
+      quiet: o.quiet ?? false
     } as Required<CollectorOptions>;
 
     if (this.opts.token) {
