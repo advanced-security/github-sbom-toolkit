@@ -12,9 +12,9 @@ const cache = JSON.parse(fs.readFileSync(cachePath, "utf8"));
 const advisories: MalwareAdvisoryNode[] = cache.advisories;
 
 const matches = matchMalware(advisories, sboms);
-console.log("Matches:");
+process.stdout.write("Matches:\n");
 for (const m of matches) {
-  console.log(`${m.repo} => ${m.purl} matched advisory ${m.advisoryGhsaId} range ${m.vulnerableVersionRange}`);
+  process.stdout.write(`${m.repo} => ${m.purl} matched advisory ${m.advisoryGhsaId} range ${m.vulnerableVersionRange}\n`);
 }
 if (!matches.length) {
   console.error("No matches found - expected chalk 5.6.1");

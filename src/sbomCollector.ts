@@ -98,7 +98,7 @@ export class SbomCollector {
       // find just the path for a single org, if given
       const loadPath = this.opts.org ? `${this.opts.loadFromDir}/${this.opts.org}` : this.opts.loadFromDir;
 
-      if (!this.opts.quiet) console.log(chalk.blue(`Loading SBOMs from cache at ${loadPath}`));
+      if (!this.opts.quiet) process.stderr.write(chalk.blue(`Loading SBOMs from cache at ${loadPath}`) + "\n");
 
       try {
         this.sboms = readAll(loadPath);
@@ -129,7 +129,7 @@ export class SbomCollector {
     }
 
     if (this.opts.enterprise && !this.opts.quiet) {
-      console.log(chalk.blue(`Getting list of organizations for enterprise ${this.opts.enterprise}`));
+      process.stderr.write(chalk.blue(`Getting list of organizations for enterprise ${this.opts.enterprise}`) + "\n");
     }
 
     const orgs = this.opts.org ? [this.opts.org] : await this.listEnterpriseOrgs(this.opts.enterprise!);
@@ -139,7 +139,7 @@ export class SbomCollector {
     const orgRepoMap: Record<string, { name: string; pushed_at?: string; updated_at?: string; default_branch?: string }[]> = {};
     let totalRepos = 0;
     for (const org of orgs) {
-      if (!this.opts.quiet) console.log(chalk.blue(`Listing repositories for org ${org}`));
+      if (!this.opts.quiet) process.stderr.write(chalk.blue(`Listing repositories for org ${org}`) + "\n");
       if (this.opts.lightDelayMs) await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
       const repos = await this.listOrgRepos(org);
       orgRepoMap[org] = repos;
@@ -167,7 +167,7 @@ export class SbomCollector {
 
     for (const org of orgs) {
       if (!this.opts.showProgressBar && !this.opts.quiet) {
-        console.log(chalk.blue(`Collecting SBOMs for org ${org}`));
+        process.stderr.write(chalk.blue(`Collecting SBOMs for org ${org}`) + "\n");
       }
       const repos = orgRepoMap[org];
       const repoNames = new Set(repos.map(r => r.name));
