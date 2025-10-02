@@ -76,6 +76,7 @@ npm run start -- --sync-sboms --enterprise ent --base-url https://github.interna
 | `--progress` | Show a dynamic progress bar during SBOM collection |
 | `--suppress-secondary-rate-limit-logs` | Hide secondary rate limit warning lines (automatically applied with `--progress`) |
 | `--quiet` | Suppress all non-error and non-result output (progress bar, JSON and human readable output still show) |
+| `--ca-bundle <path>` | Path to a PEM file containing one or more additional CA certificates (self‑signed / internal PKI) |
 
 ### Supplying PURL Queries from a File
 
@@ -109,7 +110,7 @@ npm run start -- --sbom-cache sboms --purl-file queries.txt
 npm run start -- --sync-sboms --org my-org --sbom-cache sboms
 ```
 
-2. Later offline search (no API calls; uses previously written per‑repo JSON):
+1. Later offline search (no API calls; uses previously written per‑repo JSON):
 
 ```bash
 npm run start -- --sbom-cache sboms --purl pkg:npm/react@18.2.0
@@ -210,6 +211,19 @@ Notes:
 - The tool attempts to resolve the default branch commit SHA for each repo; if it cannot, that repo's upload is skipped
 - SARIF upload merges are handled by GitHub; repeated uploads for the same commit replace earlier results for the same tool
 
+### Self-signed / Internal Certificates
+
+If your GitHub Enterprise Server instance or a TLS-intercepting proxy uses a self‑signed or private CA certificate, supply a PEM bundle so REST (Octokit), GraphQL advisory sync, and SARIF uploads trust it:
+
+```bash
+npm run start -- --sync-sboms --enterprise ent \
+  --base-url https://ghe.internal/api/v3 \
+  --ca-bundle /path/to/internal-ca.pem \
+  --sbom-cache sboms --token $GITHUB_TOKEN
+```
+
+The PEM file may contain multiple concatenated certs. If it cannot be read, a warning is emitted and the system default trust store is used.
+
 ### Interactive mode
 
 Enter an interactive prompt (arrow key history, Ctrl+C handling) after initial collection/load:
@@ -240,7 +254,7 @@ npm install
 npm run build
 ```
 
-2. Run the test harness script:
+1. Run the test harness script:
 
 ```bash
 node dist/test-fixture-match.js

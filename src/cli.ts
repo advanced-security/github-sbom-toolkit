@@ -27,6 +27,7 @@ async function main() {
     .option("sync-malware", { type: "boolean", default: false, describe: "Sync malware advisories (MALWARE classification) to local cache" })
     .option("malware-cache", { type: "string", default: "malware-cache", describe: "Directory to store malware advisory cache" })
     .option("malware-since", { type: "string", describe: "Override last sync timestamp (ISO) for malware advisory incremental sync" })
+    .option("ca-bundle", { type: "string", describe: "Path to PEM file with additional CA certificate(s) (self-signed/internal)" })
     .option("match-malware", { type: "boolean", default: false, describe: "After sync/load, match SBOM packages against malware advisories" })
     .option("sarif-dir", { type: "string", describe: "Directory to write SARIF 2.1.0 files (one per repository) when --match-malware is used" })
     .option("upload-sarif", { type: "boolean", default: false, describe: "Upload generated SARIF (per-repo) to the Code Scanning API (requires --match-malware)" })
@@ -92,6 +93,7 @@ async function main() {
     showProgressBar: argv.progress as boolean,
     suppressSecondaryRateLimitLogs: argv.suppressSecondaryRateLimitLogs as boolean,
     quiet,
+    caBundlePath: argv["ca-bundle"] as string | undefined,
   });
 
   if (!quiet) console.log(chalk.cyan(offline ? "Loading SBOMs from cache..." : "Collecting SBOMs from cache & GitHub..."));
@@ -103,7 +105,8 @@ async function main() {
     token: token!,
     baseUrl: argv["base-url"] ? (argv["base-url"] as string).replace(/\/v3$/, "/graphql") : undefined,
     cacheDir: argv["malware-cache"] as string | undefined,
-    since: argv["malware-since"] as string | undefined
+    since: argv["malware-since"] as string | undefined,
+    caBundlePath: argv["ca-bundle"] as string | undefined
   });
 
   if (argv["sync-malware"]) {
@@ -135,7 +138,7 @@ async function main() {
         if (!quiet) console.log(chalk.green(`Wrote SARIF for ${sarifMap.size} repos to ${argv.sarifDir}`));
         if (argv.uploadSarif) {
           if (!token) console.error(chalk.red("Token required for SARIF upload"));
-          else await uploadSarifPerRepo({ sarifDir: argv.sarifDir as string, matches: malwareMatches, advisories: mas.getAdvisories(), sboms, token, baseUrl: argv["base-url"] as string | undefined });
+          else await uploadSarifPerRepo({ sarifDir: argv.sarifDir as string, matches: malwareMatches, advisories: mas.getAdvisories(), sboms, token, baseUrl: argv["base-url"] as string | undefined, caBundlePath: argv["ca-bundle"] as string | undefined });
         }
       }
     }

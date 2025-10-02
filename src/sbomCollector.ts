@@ -23,6 +23,7 @@ export interface CollectorOptions {
   showProgressBar?: boolean; // render a simple progress bar when fetching SBOMs
   suppressSecondaryRateLimitLogs?: boolean; // suppress secondary rate limit warning logs (so they don't break the progress bar)
   quiet?: boolean; // suppress non-error logging (does not affect progress bar)
+  caBundlePath?: string; // path to PEM CA bundle for self-signed/internal certs
 }
 
 export class SbomCollector {
@@ -54,7 +55,8 @@ export class SbomCollector {
       autoEnableDependencyGraph: o.autoEnableDependencyGraph ?? true,
       showProgressBar: o.showProgressBar ?? false,
       suppressSecondaryRateLimitLogs: o.suppressSecondaryRateLimitLogs ?? false,
-      quiet: o.quiet ?? false
+      quiet: o.quiet ?? false,
+      caBundlePath: o.caBundlePath
     } as Required<CollectorOptions>;
 
     if (this.opts.token) {
@@ -70,7 +72,8 @@ export class SbomCollector {
           if (!this.opts.quiet) {
             console.warn(chalk.yellow(`Adaptive backoff: increased SBOM delay from ${oldDelay}ms to ${newDelay}ms after secondary rate limit.`));
           }
-        }
+        },
+        caBundlePath: this.opts.caBundlePath
       });
     }
 
