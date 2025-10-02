@@ -35,6 +35,7 @@ async function main() {
     .option("json", { type: "boolean", describe: "Emit search results as JSON to stdout (suppresses human output unless --cli also provided)" })
     .option("cli", { type: "boolean", describe: "When used with --json, also emit human-readable CLI output" })
     .option("output-file", { type: "string", describe: "Write search JSON output to this file (implied JSON generation). Required when using --cli with JSON." })
+    .option("csv", { type: "boolean", describe: "Emit results (search + malware matches) as CSV" })
     .check(args => {
       const syncing = !!args.syncSboms;
       if (syncing) {
@@ -43,12 +44,9 @@ async function main() {
       } else {
         if (!args.sbomCache) throw new Error("Offline mode requires --sbom-cache (omit --sync-sboms)");
       }
-      // If --cli is specified in combination intending JSON, require an output file to avoid mixed stdout streams.
-      if (args.cli && !args.outputFile && !args.json) {
-        throw new Error("--cli provided without --json/--output-file. Use --json --cli --output-file <path> to emit both.");
-      }
-      if (args.cli && !args.outputFile && args.json) {
-        throw new Error("--cli with --json requires --output-file to avoid interleaving JSON and human output on stdout.");
+      // If --cli is specified in combination with JSON or CSV, require an output file to avoid mixed stdout streams.
+      if (args.cli && !args.outputFile && ( args.json || args.csv ) ) {
+        throw new Error("--cli with --json or --csv requires --output-file to avoid interleaving JSON and human output on stdout.");
       }
       // check that --malware-cache is provided
       if (args["match-malware"] && !args["malware-cache"]) {
@@ -181,6 +179,7 @@ async function main() {
   const combinedPurls = combinedPurlsRaw.map(p => p.startsWith("pkg:") ? p : `pkg:${p}`);
   if (combinedPurls.length) {
     const needJson = argv.json || argv.outputFile;
+    // We'll also consider CSV export after JSON handling
     if (needJson) {
       const map = collector.searchByPurlsWithReasons(combinedPurls);
       const jsonSearch = Array.from(map.entries()).map(([repo, entries]) => ({ repo, matches: entries }));
@@ -214,6 +213,71 @@ async function main() {
     } else {
       // Pure CLI
       runSearch(combinedPurls);
+    }
+  }
+
+  // CSV output section (covers search results and malware matches if present)
+  if (argv.csv) {
+    const fs = await import("fs");
+    // Collect search data if searches were run; reconstruct from collector if we have combinedPurls
+    let searchRows: Array<{ repo: string; purl: string; reason: string }> = [];
+    if (combinedPurls.length) {
+      const map = collector.searchByPurlsWithReasons(combinedPurls);
+      for (const [repo, entries] of map.entries()) {
+        for (const { purl, reason } of entries) {
+          searchRows.push({ repo, purl, reason });
+        }
+      }
+    }
+    const malwareRows: Array<{ repo: string; purl: string; advisory: string; range: string | null; updatedAt: string }> = [];
+    if (malwareMatches) {
+      for (const m of malwareMatches) {
+        malwareRows.push({ repo: m.repo, purl: m.purl, advisory: m.advisoryGhsaId, range: m.vulnerableVersionRange, updatedAt: m.advisoryUpdatedAt });
+      }
+    }
+    // CSV columns: type,repo,purl,reason_or_advisory,range,updatedAt
+    const header = ["type","repo","purl","reason_or_advisory","range","updatedAt"];
+    const sanitize = (val: unknown): string => {
+      if (val === null || val === undefined) return "";
+      let s = String(val);
+      // Neutralize leading characters that can trigger spreadsheet formula execution
+      if (/^[=+\-@]/.test(s)) s = "'" + s; // prefix apostrophe to neutralize
+      // Escape quotes for CSV
+      if (/[",\n]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
+      return s;
+    };
+    const lines: string[] = [header.join(",")];
+    for (const r of searchRows) {
+      lines.push([
+        "search",
+        sanitize(r.repo),
+        sanitize(r.purl),
+        sanitize(r.reason),
+        "",
+        ""
+      ].join(","));
+    }
+    for (const r of malwareRows) {
+      lines.push([
+        "malware",
+        sanitize(r.repo),
+        sanitize(r.purl),
+        sanitize(r.advisory),
+        sanitize(r.range ?? ""),
+        sanitize(r.updatedAt)
+      ].join(","));
+    }
+    const csvPayload = lines.join("\n") + "\n";
+    if (argv.outFile) {
+      try {
+        fs.writeFileSync(argv.outFile as string, csvPayload, "utf8");
+        if (!quiet) console.log(chalk.green(`Wrote CSV to ${argv.outFile}`));
+      } catch (e) {
+        console.error(chalk.red(`Failed to write CSV file: ${e instanceof Error ? e.message : String(e)}`));
+        process.exit(1);
+      }
+    } else {
+      process.stdout.write(csvPayload);
     }
   }
 
