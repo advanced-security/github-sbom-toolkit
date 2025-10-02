@@ -18,7 +18,7 @@ Search collected SBOMs by PURL, cache them for offline analysis, sync malware se
 - Reason tracing: every search match shows which query matched; every malware match shows which advisory triggered it
 - Interactive REPL for ad‑hoc PURL queries (history, graceful Ctrl+C handling)
 - Optional progress bar while fetching SBOMs
-- Option to suppress secondary rate limit warnings, and full quiet mode to suppress non-error console output while retaining progress bar, human readable results and machine-readable JSON
+- Option to suppress secondary rate limit warnings, and full quiet mode to suppress informative messages
 - Intelligent skip logic: if the repository was pushed to, but the default branch head commit date isn't newer than the prior SBOM retrieval, the existing cached SBOM is reused
 - Adaptive backoff: each secondary rate limit hit increases the SBOM fetch delay by 10% to reduce future throttling
 
@@ -49,6 +49,56 @@ Using GitHub Enterprise Server:
 
 ```bash
 npm run start -- --sync-sboms --enterprise ent --base-url https://github.internal/api/v3 --sbom-cache sboms --token $GHES_TOKEN
+```
+
+### Argument Reference
+
+| Arg | Purpose |
+|------|---------|
+| `--sbom-cache <dir>` | Directory holding per-repo SBOM JSON files (required for offline mode; used as write target when syncing) |
+| `--sync-sboms` | Perform API calls to (re)collect SBOMs; without it the CLI runs offline loading cached SBOMs. Requires a GitHub token |
+| `--enterprise <slug>` / `--org <login>` | Scope selection (mutually exclusive when syncing) |
+| `--purl <purl>` | Add a PURL/range/wildcard query (repeatable) |
+| `--purl-file <file>` | File with one query per line |
+| `--json` | Emit search JSON to stdout (unless overridden by `--output-file`) |
+| `--cli` | Also emit human-readable output when producing JSON (requires `--output-file`) |
+| `--output-file <file>` | Write search JSON payload to file; required when using both `--json` and `--cli` |
+| `--interactive` | Enter interactive search prompt after initial processing |
+| `--sync-malware` | Fetch & cache malware advisories (MALWARE classification). Requires a GitHub token |
+| `--match-malware` | Match current SBOM set against cached advisories |
+| `--malware-cache <dir>` | Advisory cache directory (required with malware operations) |
+| `--sarif-dir <dir>` | Write SARIF 2.1.0 files per repository (with malware matches) |
+| `--upload-sarif` | Upload generated SARIF to Code Scanning (requires --match-malware & --sarif-dir and a GitHub token) |
+| `--concurrency <n>` | Parallel SBOM fetches (default 5) |
+| `--sbom-delay <ms>` | Delay between SBOM fetch (dependency-graph/sbom) requests (default 5000) |
+| `--light-delay <ms>` | Delay between lightweight metadata calls (listing repos, commit head checks) (default 500) |
+| `--base-url <url>` | GitHub Enterprise Server REST base URL (ends with /api/v3) |
+| `--progress` | Show a dynamic progress bar during SBOM collection |
+| `--suppress-secondary-rate-limit-logs` | Hide secondary rate limit warning lines (automatically applied with `--progress`) |
+| `--quiet` | Suppress all non-error and non-result output (progress bar, JSON and human readable output still show) |
+
+### Supplying PURL Queries from a File
+
+Provide a file containing one or more PURL (or PURL + semver range) queries, one per line. Blank lines and lines starting with `#` are ignored.
+
+Example file `queries.txt`:
+
+```text
+# Exact PURL
+pkg:npm/chalk@5.6.1
+
+# Version range (semver caret)
+pkg:npm/chalk@^5.0.0
+
+# Version range (inequalities)
+pkg:npm/chalk@>=5.0.0 <6.0.0
+
+```
+
+Run with (e.g. offline SBOMs):
+
+```bash
+npm run start -- --sbom-cache sboms --purl-file queries.txt
 ```
 
 ### SBOM Caching Workflow
@@ -93,31 +143,7 @@ npm run start -- --sbom-cache sboms --malware-cache malware-cache --match-malwar
 
 If you also perform a search in the same invocation (add `--purl` or `--purl-file`), the JSON file will contain both `malwareMatches` and `search` top-level keys.
 
-### SARIF Output & Code Scanning Upload
-
-Generate SARIF 2.1.0 files (one per repository with matches) for malware findings:
-
-```bash
-npm run start -- --sbom-cache sboms --malware-cache malware-cache --match-malware --sarif-dir sarif-out
-```
-
-Each file is named `<owner>_<repo>.sarif` and contains rules (one per advisory GHSA) and results (one per matched package).
-
-Upload those SARIF files to GitHub Code Scanning (creates alerts in each affected repository):
-
-```bash
-npm run start -- --sbom-cache sboms --malware-cache malware-cache \
-  --match-malware --sarif-dir sarif-out --upload-sarif --token $GITHUB_TOKEN
-```
-
-Notes:
-
-- `--upload-sarif` requires `--sarif-dir` and `--match-malware`.
-- A token with `security_events` (and appropriate repo/org scope) is required for uploads.
-- The tool attempts to resolve the default branch commit SHA for each repo; if it cannot, that repo's upload is skipped.
-- SARIF upload merges are handled by GitHub; repeated uploads for the same commit replace earlier results for the same tool.
-
-### Progress Bar & Log Noise Suppression
+### Progress bar & log noise suppression
 
 When collecting a large number of SBOMs you can enable a lightweight progress bar:
 
@@ -125,20 +151,18 @@ When collecting a large number of SBOMs you can enable a lightweight progress ba
 npm run start -- --sync-sboms --org my-org --sbom-cache sboms --progress
 ```
 
-If you routinely encounter secondary rate limit warnings (which can visually disrupt the bar) you can silence those specific warnings:
-
-```bash
-npm run start -- --sync-sboms --org my-org --sbom-cache sboms --progress --suppress-secondary-rate-limit-logs
-```
+Secondary rate limit warnings (which can visually disrupt the bar) are automatically silenced.
 
 Behaviour details:
 
-- The bar shows overall completion across all organizations (if using `--enterprise`) once repository counts are enumerated.
-- Rendering is throttled (~12 fps) to avoid excessive stdout writes.
-- Standard error messages (e.g., hard failures) still appear.
-- Suppression only hides the secondary rate-limit informational warnings; primary rate limit retries still log once.
+- The bar shows overall completion across all organizations (if using `--enterprise`) once repository counts are enumerated
+- Rendering is throttled (~12 fps) to avoid excessive stdout writes
+- Standard error messages (e.g., hard failures) still appear
+- Suppression only hides the secondary rate-limit informational warnings; primary rate limit retries still log once
 
-### Output Modes (Search Results)
+To reduce general log noise, you can use either `--quiet` to suppress non-error console output while retaining progress bar, human readable results and machine-readable JSON, or just `--suppress-secondary-rate-limit-logs` to suppress warnings of hitting the rate limits.
+
+### Output modes
 
 JSON only to stdout:
 
@@ -155,7 +179,38 @@ npm run start -- --sbom-cache sboms --purl pkg:npm/chalk@5.6.1 \
 
 If you specify `--cli --json`, you must also supply `--output-file` to avoid corrupted mixed stdout.
 
-### Interactive Mode
+Output lines and JSON output append a reason context:
+
+- Search matches: `{query: <original query string>}`
+- Malware matches: `{advisory: <GHSA-ID>}`
+
+This makes it clear which input (user query or specific advisory) caused each result.
+
+#### SARIF Output & Code Scanning Upload
+
+Generate SARIF 2.1.0 files (one per repository with matches) for malware matches:
+
+```bash
+npm run start -- --sbom-cache sboms --malware-cache malware-cache --match-malware --sarif-dir sarif-out
+```
+
+Each file is named `<owner>_<repo>.sarif` and contains rules (one per advisory GHSA) and results (one per matched package).
+
+Upload those SARIF files to GitHub Code Scanning (creates alerts in each affected repository):
+
+```bash
+npm run start -- --sbom-cache sboms --malware-cache malware-cache \
+  --match-malware --sarif-dir sarif-out --upload-sarif --token $GITHUB_TOKEN
+```
+
+Notes:
+
+- `--upload-sarif` requires `--sarif-dir` and `--match-malware`
+- A token with `security_events` (and appropriate repo/org scope) is required for uploads
+- The tool attempts to resolve the default branch commit SHA for each repo; if it cannot, that repo's upload is skipped
+- SARIF upload merges are handled by GitHub; repeated uploads for the same commit replace earlier results for the same tool
+
+### Interactive mode
 
 Enter an interactive prompt (arrow key history, Ctrl+C handling) after initial collection/load:
 
@@ -165,7 +220,16 @@ npm run start -- --sbom-cache sboms --interactive
 
 Then type one PURL query per line. Entering a blank line or using Ctrl+C on a blank line exits. Ctrl+C on a non-blank line clears the line.
 
-### Offline Fixture Test
+## Build & test
+
+## Build
+
+```bash
+npm install
+npm run build
+```
+
+## Test
 
 The repo ships with a minimal test fixture to validate end-to-end malware matching without making network calls.
 
@@ -195,89 +259,23 @@ Alternatively, you can exercise the CLI purely offline using the fixtures (no to
 npm run start -- --sbom-cache fixtures/sboms --malware-cache fixtures/malware-cache --match-malware
 ```
 
-## Build
-
-```bash
-npm install
-npm run build
-```
-
-## Notes
-
-### Supplying PURL Queries from a File
-
-Provide a file containing one or more PURL (or PURL + semver range) queries, one per line. Blank lines and lines starting with `#` are ignored.
-
-Example file `queries.txt`:
-
-```text
-# Exact PURL
-pkg:npm/chalk@5.6.1
-
-# Version range (semver caret)
-pkg:npm/chalk@^5.0.0
-
-# Version range (inequalities)
-pkg:npm/chalk@>=5.0.0 <6.0.0
-
-```
-
-Run with (offline):
-
-```bash
-npm run start -- --sbom-cache sboms --purl-file queries.txt
-```
-
-Or (fresh sync + file-based queries):
-
-```bash
-npm run start -- --sync-sboms --org my-org --sbom-cache sboms --purl-file queries.txt
-```
-
-### Argument Reference
-
-| Arg | Purpose |
-|------|---------|
-| `--sbom-cache <dir>` | Directory holding per-repo SBOM JSON files (required for offline mode; used as write target when syncing) |
-| `--sync-sboms` | Perform API calls to (re)collect SBOMs; without it the CLI runs offline loading cached SBOMs. Requires a GitHub token |
-| `--enterprise <slug>` / `--org <login>` | Scope selection (mutually exclusive when syncing) |
-| `--purl <purl>` | Add a PURL/range/wildcard query (repeatable) |
-| `--purl-file <file>` | File with one query per line |
-| `--json` | Emit search JSON to stdout (unless overridden by `--output-file`) |
-| `--cli` | Also emit human-readable output when producing JSON (requires `--output-file`) |
-| `--output-file <file>` | Write search JSON payload to file; required when using both `--json` and `--cli` |
-| `--interactive` | Enter interactive search prompt after initial processing |
-| `--sync-malware` | Fetch & cache malware advisories (MALWARE classification). Requires a GitHub token |
-| `--match-malware` | Match current SBOM set against cached advisories |
-| `--malware-cache <dir>` | Advisory cache directory (required with malware operations) |
-| `--sarif-dir <dir>` | Write SARIF 2.1.0 files per repository (with malware matches) |
-| `--upload-sarif` | Upload generated SARIF to Code Scanning (requires --match-malware & --sarif-dir and a GitHub token) |
-| `--concurrency <n>` | Parallel SBOM fetches (default 5) |
-| `--sbom-delay <ms>` | Delay between SBOM fetch (dependency-graph/sbom) requests (default 5000) |
-| `--light-delay <ms>` | Delay between lightweight metadata calls (listing repos, commit head checks) (default 500) |
-| `--base-url <url>` | GitHub Enterprise Server REST base URL (ends with /api/v3) |
-| `--progress` | Show a dynamic progress bar during SBOM collection |
-| `--suppress-secondary-rate-limit-logs` | Hide secondary rate limit warning lines (useful with `--progress`) |
-| `--quiet` | Suppress all non-error and non-result output (progress bar, JSON and human readable output still show) |
-
-### Reason Tracing
-
-Output lines append a reason context:
-
-- Search matches: `{query: <original query string>}`
-- Malware matches: `{advisory: <GHSA-ID>}`
-
-This makes it clear which input (user query or specific advisory) caused each result.
+## Authentication and Rate Limiting
 
 ### Rate Limiting & Retries
 
-- Standard & secondary rate limits automatically retried (up to 2 times)
-- You can tune concurrency and increase the delay to reduce the chance of hitting rate limits
+Standard & secondary rate limits automatically retried (up to 2 times).
 
-### Authentication Notes
+You can tune concurrency and increase the delay to reduce the chance of hitting rate limits.
 
-- A GitHub token is required when performing network operations such as `--sync-sboms`, `--sync-malware` and `--upload-sarif`
-- Offline operations (pure searches, matches using pre-cached data) need no token
+Each time a secondary rate limit is hit, the delay between fetching SBOMs is increased by 10%, to provide a way to adaptively respond to that rate limit.
+
+### Authentication
+
+A GitHub token with appropriate scope is required when performing network operations such as `--sync-sboms`, `--sync-malware` and `--upload-sarif`.
+
+It can be provided in the `GITHUB_TOKEN` environment variable, or with the `--token` argument.
+
+Offline operations (pure searches, matches using pre-cached data) need no token.
 
 ## License
 
