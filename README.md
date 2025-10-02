@@ -60,7 +60,7 @@ npm run start -- --sync-sboms --enterprise ent --base-url https://github.interna
 npm run start -- --sync-sboms --org my-org --sbom-cache sboms
 ```
 
-1. Later offline search (no API calls; uses previously written per‑repo JSON):
+2. Later offline search (no API calls; uses previously written per‑repo JSON):
 
 ```bash
 npm run start -- --sbom-cache sboms --purl pkg:npm/react@18.2.0
@@ -177,7 +177,7 @@ npm install
 npm run build
 ```
 
-1. Run the test harness script:
+2. Run the test harness script:
 
 ```bash
 node dist/test-fixture-match.js
