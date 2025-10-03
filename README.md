@@ -341,7 +341,7 @@ npm install
 npm run build
 ```
 
-1. Run the test harness script:
+2. Run the test harness script:
 
 ```bash
 node dist/test-fixture-match.js
