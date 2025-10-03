@@ -2,30 +2,33 @@
 
 Enumerate Dependency Graph SBOMs from all repositories in a GitHub Enterprise (all orgs) or a single organization.
 
-Search collected SBOMs by PURL, cache them for offline analysis, sync malware security advisories, and match SBOM packages against those advisories. Supports human-readable and JSON output with file output for JSON.
+Search collected SBOMs by PURL, cache them for offline analysis, sync malware security advisories, and match SBOM packages against those advisories.
+
+Supports human-readable, JSON, CSV and SARIF output. SARIF alerts can be uploaded to GitHub Code Scanning.
 
 > [!NOTE]
 > This is an _unofficial_ tool created by Field Security Specialists, and is not officially supported by GitHub.
 
 ## 🚀 Features
 
-- Enumerate orgs in an Enterprise and repos in each org
-- Fetch SBOM per repo with concurrency + optional delay and retry/throttle handling
-- Search for packages by exact PURL, semver/range, or wildcard (trailing `/*` after the package name path segment)
-- Cache SBOMs in a directory (one file per repository)
-  - SBOMs are written incrementally to allow for stopping and resuming
-- Sync malware security advisories from the GitHub Advisory Database
-- Version-aware matching of SBOM packages vs. malware advisories
-- Optional suppression of "unbounded" malware advisories that claim all versions are affected (e.g. vulnerable range '*', '>=0')
-- Optional SARIF 2.1.0 output per repository for malware matches with optional Code Scanning upload
-- YAML ignore file support to suppress specific advisory IDs or PURLs globally or scoped to an org / repo
+- Enumerate organizations in an Enterprise and repositories in each organization
+- Fetch SBOM per repository with concurrency + optional delay and retry/throttle handling
+  - Optional progress bar while fetching SBOMs
+  - Option to suppress secondary rate limit warnings, and full quiet mode to suppress informative messages
+  - Adaptive backoff: each secondary rate limit hit increases the SBOM fetch delay by 10% to reduce future throttling
+- Offline caching of SBOMs and security advisories with incremental updates
+- Matching:
+  - Version-aware matching of SBOM packages against malware advisories
+    - Optional suppression of "unbounded" malware advisories that state all versions are affected (e.g. vulnerable range '*', '>=0')
+  - Search for packages by exact PURL, semver/range, or wildcard (trailing `/*` after the package name path segment)
+  - Interactive REPL for ad‑hoc PURL queries (history, graceful Ctrl+C handling)
+  - YAML ignore file support to suppress specific advisory IDs or PURLs globally or scoped to an org / repo
+  - Reason tracing: every search match shows which query matched; every malware match shows which advisory triggered it
+- Output:
+  - Human-readable console output
+  - JSON or CSV output (to stdout or file) with both search and malware matches
+  - Optional SARIF 2.1.0 output per repository for malware matches with optional Code Scanning upload
 - Works with GitHub.com, GitHub Enterprise Server, GitHub Enterprise Managed Users and GitHub Enterprise Cloud with Data Residency (custom base URL)
-- Reason tracing: every search match shows which query matched; every malware match shows which advisory triggered it
-- Interactive REPL for ad‑hoc PURL queries (history, graceful Ctrl+C handling)
-- Optional progress bar while fetching SBOMs
-- Intelligent skip logic: if the repository was pushed to, but the default branch head commit date isn't newer than the prior SBOM retrieval, the existing cached SBOM is reused
-- Option to suppress secondary rate limit warnings, and full quiet mode to suppress informative messages
-- Adaptive backoff: each secondary rate limit hit increases the SBOM fetch delay by 10% to reduce future throttling
 
 ## Usage
 
@@ -94,7 +97,7 @@ npm run start -- --sbom-cache sboms --purl-file queries.txt
 npm run start -- --sync-sboms --org my-org --sbom-cache sboms
 ```
 
-1. Later offline search (no API calls; uses previously written per‑repo JSON):
+2. Later offline search (no API calls; uses previously written per‑repo JSON):
 
 ```bash
 npm run start -- --sbom-cache sboms --purl pkg:npm/react@18.2.0
@@ -161,7 +164,7 @@ The first matching rule suppresses the finding; output logs will show how many w
 
 ##### Ignoring "Unbounded" Malware Advisories
 
-Some malware advisories list a vulnerable version range that effectively covers every possible version of a package (examples: `*`, `>=0`, `0`, `0.0.0`, `>=0.0.0`). These can create low‑signal noise when you only want to focus on advisories with actionable version scoping.
+Some malware advisories list a vulnerable version range that effectively covers every possible version of a package (examples: `*`, `>=0`, `0`, `0.0.0`, `>=0.0.0`). These can create low‑signal noise, such as from name-shadowing attacks against a private package.
 
 Use the flag:
 
@@ -174,10 +177,8 @@ When enabled, any malware match whose `vulnerableVersionRange` normalizes to one
 Heuristics currently treated as unbounded:
 
 - `*`
-- `>=0`, `>0`
-- `0`, `0.0.0`, `>=0.0.0`
-
-If you need broader or narrower interpretation (e.g., treat `>=0 <999999.0.0` as unbounded) please file an issue or extend the matcher.
+- `>= 0`, `> 0`
+- `0`, `0.0.0`, `>= 0.0.0`
 
 #### Advisory Date Cutoff
 
@@ -263,7 +264,7 @@ npm run start -- --sbom-cache sboms --malware-cache malware-cache \
 Notes:
 
 - `--upload-sarif` requires `--sarif-dir` and `--match-malware`
-- A token with `security_events` (and appropriate repo/org scope) is required for uploads
+- A token with appropriate repo/org scope and access is required for uploads
 - The tool attempts to resolve the default branch commit SHA for each repo; if it cannot, that repo's upload is skipped
 - SARIF upload merges are handled by GitHub; repeated uploads for the same commit replace earlier results for the same tool
 
