@@ -15,6 +15,7 @@ Search collected SBOMs by PURL, cache them for offline analysis, sync malware se
 - Version-aware matching of SBOM packages vs. malware advisories
 - Optional SARIF 2.1.0 output per repository for malware matches with optional Code Scanning upload
 - YAML ignore file support to suppress specific advisory IDs or PURLs globally or scoped to an org / repo
+- Optional suppression of "unbounded" malware advisories that claim all versions are affected (e.g. vulnerable range '*', '>=0')
 - Works with GitHub.com, GitHub Enterprise Server, GitHub Enterprise Managed Users and GitHub Enterprise Cloud with Data Residency (custom base URL)
 - Reason tracing: every search match shows which query matched; every malware match shows which advisory triggered it
 - Interactive REPL for ad‑hoc PURL queries (history, graceful Ctrl+C handling)
@@ -70,6 +71,7 @@ npm run start -- --sync-sboms --enterprise ent --base-url https://github.interna
 | `--malware-cache <dir>` | Advisory cache directory (required with malware operations) |
 | `--malware-cutoff <ISO-date>` | Ignore advisories whose publishedAt AND updatedAt are both before this date/time (e.g. `2025-09-29` or full timestamp) |
 | `--ignore-file <path>` | YAML ignore file (advisories / purls / scoped blocks) to filter malware matches before output |
+| `--ignore-unbounded-malware` | Ignore matches whose advisory vulnerable version range covers all versions (e.g. `*`, `>=0`, `0.0.0`) |
 | `--sarif-dir <dir>` | Write SARIF 2.1.0 files per repository (with malware matches) |
 | `--upload-sarif` | Upload generated SARIF to Code Scanning (requires --match-malware & --sarif-dir and a GitHub token) |
 | `--concurrency <n>` | Parallel SBOM fetches (default 5) |
@@ -177,6 +179,26 @@ Rules precedence:
 3. Global advisories / purls
 
 The first matching rule suppresses the finding; output logs will show how many were ignored. Ignored items are fully removed from SARIF and JSON/CSV outputs.
+
+##### Ignoring "Unbounded" Malware Advisories
+
+Some malware advisories list a vulnerable version range that effectively covers every possible version of a package (examples: `*`, `>=0`, `0`, `0.0.0`, `>=0.0.0`). These can create low‑signal noise when you only want to focus on advisories with actionable version scoping.
+
+Use the flag:
+
+```bash
+--ignore-unbounded-malware
+```
+
+When enabled, any malware match whose `vulnerableVersionRange` normalizes to one of those unbounded patterns is filtered out before JSON / SARIF / CSV output. A summary line (to stderr) reports how many were removed.
+
+Heuristics currently treated as unbounded:
+
+- `*`
+- `>=0`, `>0`
+- `0`, `0.0.0`, `>=0.0.0`
+
+If you need broader or narrower interpretation (e.g., treat `>=0 <999999.0.0` as unbounded) please file an issue or extend the matcher.
 
 #### Advisory Date Cutoff
 

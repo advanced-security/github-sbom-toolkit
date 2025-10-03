@@ -38,6 +38,7 @@ async function main() {
     .option("output-file", { type: "string", describe: "Write search JSON/CSV output to this file. Required when using --cli with JSON/CSV." })
     .option("csv", { type: "boolean", describe: "Emit results (search + malware matches) as CSV" })
     .option("ignore-file", { type: "string", describe: "Path to YAML ignore file (advisories, purls, scoped ignores)" })
+    .option("ignore-unbounded-malware", { type: "boolean", default: false, describe: "Ignore malware advisories whose vulnerable range covers all versions (e.g. '*', '>=0')" })
     .check(args => {
       const syncing = !!args.syncSboms;
       if (syncing) {
@@ -83,6 +84,10 @@ async function main() {
 
   const offline = !argv.syncSboms;
   const quiet = argv.quiet as boolean;
+  const wantJson = !!argv.json;
+  const wantCsv = !!argv.csv;
+  const hasOutputFile = !!argv.outputFile;
+  const wantCli = !!argv.cli && hasOutputFile; // only allow CLI alongside machine output when writing file
   const collector = new SbomCollector({
     token: token,
     enterprise: argv.enterprise as string | undefined,
@@ -124,6 +129,19 @@ async function main() {
   if (argv["match-malware"]) {
     const { matchMalware, buildSarifPerRepo, writeSarifFiles, uploadSarifPerRepo } = await import("./malwareMatcher.js");
     malwareMatches = matchMalware(mas.getAdvisories(), sboms, { advisoryDateCutoff: argv["malware-cutoff"] as string | undefined });
+    // Optional suppression of unbounded version-range advisories
+    if (argv["ignore-unbounded-malware"] && malwareMatches?.length) {
+      const before = malwareMatches.length;
+      const isUnbounded = (range: string | null) => {
+        if (!range) return false;
+        const r = range.trim();
+        if (r === "*") return true;
+        const compact = r.replace(/\s+/g, "");
+        return /^(>=|>=?) ?0(\.0){0,2}$/i.test(compact); // '>=0', '>0', '0', '0.0.0'
+      };
+      malwareMatches = malwareMatches.filter(m => !isUnbounded(m.vulnerableVersionRange));
+      if (!quiet) process.stderr.write(chalk.yellow(`Filtered ${before - malwareMatches.length} unbounded-range malware match(es)`) + "\n");
+    }
     // Apply ignore file if provided
     if (argv["ignore-file"] && malwareMatches?.length) {
       try {
@@ -145,7 +163,8 @@ async function main() {
     }
     if (!quiet) process.stderr.write(chalk.magenta(`Malware matches found: ${malwareMatches?.length ?? 0}`) + "\n");
     if (malwareMatches) {
-      if (!quiet) {
+      const showMalwareCli = (!wantJson && !wantCsv) || wantCli; // show only in pure CLI or combined mode
+      if (showMalwareCli && !quiet) {
         for (const m of malwareMatches) {
           process.stdout.write(`${m.repo} :: ${m.purl} => ${m.advisoryGhsaId} (${m.vulnerableVersionRange ?? "(no range)"}) {advisory: ${m.reason}} ${m.advisoryPermalink}\n`);
         }
@@ -170,13 +189,12 @@ async function main() {
     process.stderr.write(chalk.blue("All repositories reused from cache (no new SBOM writes).") + "\n");
   }
 
-  const runSearch = (purls: string[]) => {
-    const results = collector.searchByPurlsWithReasons(purls);
-    if (!quiet) process.stderr.write(chalk.magenta(`Search results for ${purls.length} purl(s):`) + "\n");
+  const runSearchCli = (purls: string[], results: Map<string, { purl: string; reason: string }[]>) => {
     if (!results.size) {
-      if (!quiet) process.stdout.write("No matches.\n");
+      process.stdout.write("No matches.\n");
       return;
     }
+    if (!quiet) process.stderr.write(chalk.magenta(`Search results for ${purls.length} purl(s):`) + "\n");
     for (const [repo, entries] of results.entries()) {
       process.stdout.write(chalk.bold(repo) + "\n");
       for (const { purl, reason } of entries) process.stdout.write(`  - ${purl} {query: ${reason}}\n`);
@@ -201,55 +219,41 @@ async function main() {
   }
   const combinedPurlsRaw = [...(argv.purl as string[] ?? []), ...filePurls];
   const combinedPurls = combinedPurlsRaw.map(p => p.startsWith("pkg:") ? p : `pkg:${p}`);
+  let searchMap: Map<string, { purl: string; reason: string }[]> | undefined;
   if (combinedPurls.length) {
-    // We'll also consider CSV export after JSON handling
-    if (argv.json || argv.outputFile) {
-      const map = collector.searchByPurlsWithReasons(combinedPurls);
-      const jsonSearch = Array.from(map.entries()).map(([repo, entries]) => ({ repo, matches: entries }));
-      if (argv.outputFile) {
-        try {
-          const fs = await import("fs");
-          let existing: { search?: unknown; malwareMatches?: import("./malwareMatcher.js").MalwareMatch[] } = {};
-          if (fs.existsSync(argv.outputFile as string)) {
-            try { existing = JSON.parse(fs.readFileSync(argv.outputFile as string, "utf8")); } catch { existing = {}; }
-          }
-          existing.search = jsonSearch;
-          if (malwareMatches) existing.malwareMatches = existing.malwareMatches || malwareMatches; // preserve if already set
-          const payload = JSON.stringify(existing, null, 2) + "\n";
-          fs.writeFileSync(argv.outputFile as string, payload, "utf8");
-          if (!quiet) process.stderr.write(chalk.green(`Wrote search JSON to ${argv.outputFile}`) + "\n");
-        } catch (e) {
-          console.error(chalk.red(`Failed to write output file: ${e instanceof Error ? e.message : String(e)}`));
-          process.exit(1);
+    searchMap = collector.searchByPurlsWithReasons(combinedPurls);
+  }
+  if (wantJson) {
+    const jsonSearch = Array.from((searchMap || new Map()).entries()).map(([repo, entries]) => ({ repo, matches: entries }));
+    if (hasOutputFile) {
+      try {
+        const fs = await import("fs");
+        let existing: { search?: unknown; malwareMatches?: import("./malwareMatcher.js").MalwareMatch[] } = {};
+        if (fs.existsSync(argv.outputFile as string)) {
+          try { existing = JSON.parse(fs.readFileSync(argv.outputFile as string, "utf8")); } catch { existing = {}; }
         }
-      } else {
-        const payloadObj: { search: unknown; malwareMatches?: import("./malwareMatcher.js").MalwareMatch[] } = { search: jsonSearch };
-        if (malwareMatches) payloadObj.malwareMatches = malwareMatches;
-        process.stdout.write(JSON.stringify(payloadObj, null, 2) + "\n");
-      }
-      // If CLI output requested (either implicit because no --json OR explicit --cli with output-file requirement) then show human form
-      if (((!argv.json && !argv.csv) && !argv.outputFile) || (argv.cli && (argv.json || argv.outputFile))) {
-        runSearch(combinedPurls);
-      } else if (argv.cli) { // This branch only occurs when validation prevented missing output-file
-        runSearch(combinedPurls);
+        existing.search = jsonSearch;
+        if (malwareMatches) existing.malwareMatches = existing.malwareMatches || malwareMatches;
+        fs.writeFileSync(argv.outputFile as string, JSON.stringify(existing, null, 2) + "\n", "utf8");
+        if (!quiet) process.stderr.write(chalk.green(`Wrote search JSON to ${argv.outputFile}`) + "\n");
+      } catch (e) {
+        console.error(chalk.red(`Failed to write output file: ${(e as Error).message}`));
+        process.exit(1);
       }
     } else {
-      // Pure CLI
-      runSearch(combinedPurls);
+      const payloadObj: { search: unknown; malwareMatches?: import("./malwareMatcher.js").MalwareMatch[] } = { search: jsonSearch };
+      if (malwareMatches) payloadObj.malwareMatches = malwareMatches;
+      process.stdout.write(JSON.stringify(payloadObj, null, 2) + "\n");
     }
-  }
-
-  // CSV output section (covers search results and malware matches if present)
-  if (argv.csv) {
+    if (wantCli && searchMap) runSearchCli(combinedPurls, searchMap);
+  } else if (wantCsv) {
+    // CSV output section (covers search results and malware matches if present)
     const fs = await import("fs");
     // Collect search data if searches were run; reconstruct from collector if we have combinedPurls
     const searchRows: Array<{ repo: string; purl: string; reason: string }> = [];
-    if (combinedPurls.length) {
-      const map = collector.searchByPurlsWithReasons(combinedPurls);
-      for (const [repo, entries] of map.entries()) {
-        for (const { purl, reason } of entries) {
-          searchRows.push({ repo, purl, reason });
-        }
+    if (combinedPurls.length && searchMap) {
+      for (const [repo, entries] of searchMap.entries()) {
+        for (const { purl, reason } of entries) searchRows.push({ repo, purl, reason });
       }
     }
     const malwareRows: Array<{ repo: string; purl: string; advisory: string; range: string | null; updatedAt: string }> = [];
@@ -291,10 +295,10 @@ async function main() {
       ].join(","));
     }
     const csvPayload = lines.join("\n") + "\n";
-    if (argv.outFile) {
+    if (hasOutputFile) {
       try {
-        fs.writeFileSync(argv.outFile as string, csvPayload, "utf8");
-        if (!quiet) process.stderr.write(chalk.green(`Wrote CSV to ${argv.outFile}`) + "\n");
+        fs.writeFileSync(argv.outputFile as string, csvPayload, "utf8");
+        if (!quiet) process.stderr.write(chalk.green(`Wrote CSV to ${argv.outputFile}`) + "\n");
       } catch (e) {
         console.error(chalk.red(`Failed to write CSV file: ${e instanceof Error ? e.message : String(e)}`));
         process.exit(1);
@@ -302,6 +306,10 @@ async function main() {
     } else {
       process.stdout.write(csvPayload);
     }
+    if (wantCli && searchMap) runSearchCli(combinedPurls, searchMap);
+  } else if (combinedPurls.length && searchMap) {
+    // Pure CLI (no json/csv)
+    runSearchCli(combinedPurls, searchMap);
   }
 
   // If malware matches were computed but no search JSON writing happened yet and an output file was requested, persist them now.
@@ -361,7 +369,8 @@ async function main() {
         }
         const list = trimmed.split(/[\s,]+/).filter(Boolean);
         try {
-          runSearch(list);
+          const map = collector.searchByPurlsWithReasons(list.map(p => p.startsWith("pkg:") ? p : `pkg:${p}`));
+          runSearchCli(list, map);
         } catch (e) {
           console.error(chalk.red((e as Error).message));
         }
@@ -379,7 +388,8 @@ async function main() {
           { name: "purl", message: "Enter a PURL (blank to exit)", type: "input" }
         ]);
         if (!ans.purl) break;
-        runSearch([ans.purl]);
+  const map = collector.searchByPurlsWithReasons([ans.purl.startsWith("pkg:") ? ans.purl : `pkg:${ans.purl}`]);
+  runSearchCli([ans.purl], map);
       }
     }
   }
