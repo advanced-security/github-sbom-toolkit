@@ -4,7 +4,10 @@ Enumerate Dependency Graph SBOMs from all repositories in a GitHub Enterprise (a
 
 Search collected SBOMs by PURL, cache them for offline analysis, sync malware security advisories, and match SBOM packages against those advisories. Supports human-readable and JSON output with file output for JSON.
 
-## Features
+> [!NOTE]
+> This is an _unofficial_ tool created by Field Security Specialists, and is not officially supported by GitHub.
+
+## 🚀 Features
 
 - Enumerate orgs in an Enterprise and repos in each org
 - Fetch SBOM per repo with concurrency + optional delay and retry/throttle handling
@@ -13,20 +16,16 @@ Search collected SBOMs by PURL, cache them for offline analysis, sync malware se
   - SBOMs are written incrementally to allow for stopping and resuming
 - Sync malware security advisories from the GitHub Advisory Database
 - Version-aware matching of SBOM packages vs. malware advisories
+- Optional suppression of "unbounded" malware advisories that claim all versions are affected (e.g. vulnerable range '*', '>=0')
 - Optional SARIF 2.1.0 output per repository for malware matches with optional Code Scanning upload
 - YAML ignore file support to suppress specific advisory IDs or PURLs globally or scoped to an org / repo
-- Optional suppression of "unbounded" malware advisories that claim all versions are affected (e.g. vulnerable range '*', '>=0')
 - Works with GitHub.com, GitHub Enterprise Server, GitHub Enterprise Managed Users and GitHub Enterprise Cloud with Data Residency (custom base URL)
 - Reason tracing: every search match shows which query matched; every malware match shows which advisory triggered it
 - Interactive REPL for ad‑hoc PURL queries (history, graceful Ctrl+C handling)
 - Optional progress bar while fetching SBOMs
-- Option to suppress secondary rate limit warnings, and full quiet mode to suppress informative messages
 - Intelligent skip logic: if the repository was pushed to, but the default branch head commit date isn't newer than the prior SBOM retrieval, the existing cached SBOM is reused
+- Option to suppress secondary rate limit warnings, and full quiet mode to suppress informative messages
 - Adaptive backoff: each secondary rate limit hit increases the SBOM fetch delay by 10% to reduce future throttling
-
-## Auth Requirements
-
-Token needs scopes: `repo`, `read:org`, and `security_events` (for dependency graph SBOM API). For public-only scanning you may omit `repo`.
 
 ## Usage
 
@@ -53,35 +52,15 @@ Using GitHub Enterprise Server:
 npm run start -- --sync-sboms --enterprise ent --base-url https://github.internal/api/v3 --sbom-cache sboms --token $GHES_TOKEN
 ```
 
-### Argument Reference
+### 🔑 Authentication
 
-| Arg | Purpose |
-|------|---------|
-| `--sbom-cache <dir>` | Directory holding per-repo SBOM JSON files (required for offline mode; used as write target when syncing) |
-| `--sync-sboms` | Perform API calls to (re)collect SBOMs; without it the CLI runs offline loading cached SBOMs. Requires a GitHub token |
-| `--enterprise <slug>` / `--org <login>` | Scope selection (mutually exclusive when syncing) |
-| `--purl <purl>` | Add a PURL/range/wildcard query (repeatable) |
-| `--purl-file <file>` | File with one query per line |
-| `--json` | Emit search JSON to stdout (unless overridden by `--output-file`) |
-| `--cli` | Also emit human-readable output when producing JSON (requires `--output-file`) |
-| `--output-file <file>` | Write search JSON payload to file; required when using both `--json` and `--cli` |
-| `--interactive` | Enter interactive search prompt after initial processing |
-| `--sync-malware` | Fetch & cache malware advisories (MALWARE classification). Requires a GitHub token |
-| `--match-malware` | Match current SBOM set against cached advisories |
-| `--malware-cache <dir>` | Advisory cache directory (required with malware operations) |
-| `--malware-cutoff <ISO-date>` | Ignore advisories whose publishedAt AND updatedAt are both before this date/time (e.g. `2025-09-29` or full timestamp) |
-| `--ignore-file <path>` | YAML ignore file (advisories / purls / scoped blocks) to filter malware matches before output |
-| `--ignore-unbounded-malware` | Ignore matches whose advisory vulnerable version range covers all versions (e.g. `*`, `>=0`, `0.0.0`) |
-| `--sarif-dir <dir>` | Write SARIF 2.1.0 files per repository (with malware matches) |
-| `--upload-sarif` | Upload generated SARIF to Code Scanning (requires --match-malware & --sarif-dir and a GitHub token) |
-| `--concurrency <n>` | Parallel SBOM fetches (default 5) |
-| `--sbom-delay <ms>` | Delay between SBOM fetch (dependency-graph/sbom) requests (default 5000) |
-| `--light-delay <ms>` | Delay between lightweight metadata calls (listing repos, commit head checks) (default 500) |
-| `--base-url <url>` | GitHub Enterprise Server REST base URL (ends with /api/v3) |
-| `--progress` | Show a dynamic progress bar during SBOM collection |
-| `--suppress-secondary-rate-limit-logs` | Hide secondary rate limit warning lines (automatically applied with `--progress`) |
-| `--quiet` | Suppress all non-error and non-result output (progress bar, JSON and human readable output still show) |
-| `--ca-bundle <path>` | Path to a PEM file containing one or more additional CA certificates (self‑signed / internal PKI) |
+A GitHub token with appropriate scope is required when performing network operations such as `--sync-sboms`, `--sync-malware` and `--upload-sarif`.
+
+A fine-grained PAT needs scope `Read-only` on `Contents`. To upload SARIF you need `Read and write` on `Code scanning alerts`. If necessary you can use a Classic PAT, or a token from a GitHub App with `repo`, `read:org`, and `security_events` (write) scopes. You may find generating a token with the [`gh` CLI](https://cli.github.com/) is convenient.
+
+It can be provided in the `GITHUB_TOKEN` environment variable, or with the `--token` argument.
+
+Offline operations (pure searches, matches using pre-cached data) need no token.
 
 ### Supplying PURL Queries from a File
 
@@ -311,16 +290,46 @@ npm run start -- --sbom-cache sboms --interactive
 
 Then type one PURL query per line. Entering a blank line or using Ctrl+C on a blank line exits. Ctrl+C on a non-blank line clears the line.
 
+## Argument Reference
+
+| Arg | Purpose |
+|------|---------|
+| `--sbom-cache <dir>` | Directory holding per-repo SBOM JSON files (required for offline mode; used as write target when syncing) |
+| `--sync-sboms` | Perform API calls to (re)collect SBOMs; without it the CLI runs offline loading cached SBOMs. Requires a GitHub token |
+| `--enterprise <slug>` / `--org <login>` | Scope selection (mutually exclusive when syncing) |
+| `--purl <purl>` | Add a PURL/range/wildcard query (repeatable) |
+| `--purl-file <file>` | File with one query per line |
+| `--json` | Emit search JSON to stdout (unless overridden by `--output-file`) |
+| `--cli` | Also emit human-readable output when producing JSON (requires `--output-file`) |
+| `--output-file <file>` | Write search JSON payload to file; required when using both `--json` and `--cli` |
+| `--interactive` | Enter interactive search prompt after initial processing |
+| `--sync-malware` | Fetch & cache malware advisories (MALWARE classification). Requires a GitHub token |
+| `--match-malware` | Match current SBOM set against cached advisories |
+| `--malware-cache <dir>` | Advisory cache directory (required with malware operations) |
+| `--malware-cutoff <ISO-date>` | Ignore advisories whose publishedAt AND updatedAt are both before this date/time (e.g. `2025-09-29` or full timestamp) |
+| `--ignore-file <path>` | YAML ignore file (advisories / purls / scoped blocks) to filter malware matches before output |
+| `--ignore-unbounded-malware` | Ignore matches whose advisory vulnerable version range covers all versions (e.g. `*`, `>=0`, `0.0.0`) |
+| `--sarif-dir <dir>` | Write SARIF 2.1.0 files per repository (with malware matches) |
+| `--upload-sarif` | Upload generated SARIF to Code Scanning (requires --match-malware & --sarif-dir and a GitHub token) |
+| `--concurrency <n>` | Parallel SBOM fetches (default 5) |
+| `--sbom-delay <ms>` | Delay between SBOM fetch (dependency-graph/sbom) requests (default 5000) |
+| `--light-delay <ms>` | Delay between lightweight metadata calls (listing repos, commit head checks) (default 500) |
+| `--base-url <url>` | GitHub Enterprise Server REST base URL (ends with /api/v3) |
+| `--progress` | Show a dynamic progress bar during SBOM collection |
+| `--suppress-secondary-rate-limit-logs` | Hide secondary rate limit warning lines (automatically applied with `--progress`) |
+| `--quiet` | Suppress all non-error and non-result output (progress bar, JSON and human readable output still show) |
+| `--ca-bundle <path>` | Path to a PEM file containing one or more additional CA certificates (self‑signed / internal PKI) |
+
 ## Build & test
 
-## Build
+## 🏗️ Build
 
 ```bash
 npm install
 npm run build
 ```
 
-## Test
+## 🧪 Test
 
 The repo ships with a minimal test fixture to validate end-to-end malware matching without making network calls.
 
@@ -350,24 +359,33 @@ Alternatively, you can exercise the CLI purely offline using the fixtures (no to
 npm run start -- --sbom-cache fixtures/sboms --malware-cache fixtures/malware-cache --match-malware
 ```
 
-## Authentication and Rate Limiting
+## 🚦 Rate Limiting
 
-### Rate Limiting & Retries
-
-Standard & secondary rate limits automatically retried (up to 2 times).
+Standard & secondary rate limits trigger an automatic retry (up to 2 times).
 
 You can tune concurrency and increase the delay to reduce the chance of hitting rate limits.
 
 Each time a secondary rate limit is hit, the delay between fetching SBOMs is increased by 10%, to provide a way to adaptively respond to that rate limit.
 
-### Authentication
+## 🤝 Contributing
 
-A GitHub token with appropriate scope is required when performing network operations such as `--sync-sboms`, `--sync-malware` and `--upload-sarif`.
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details on how to contribute to this project.
 
-It can be provided in the `GITHUB_TOKEN` environment variable, or with the `--token` argument.
+## 📄 License
 
-Offline operations (pure searches, matches using pre-cached data) need no token.
+MIT License - see [LICENSE](LICENSE) file for details
 
-## License
+## 🆘 Support
 
-MIT License
+> [!NOTE]
+> This is an _unofficial_ tool created by Field Security Specialists, and is not officially supported by GitHub.
+
+See [SUPPORT.md](SUPPORT.md) for support options.
+
+## 📜 Code of Conduct
+
+See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for our Code of Conduct.
+
+## 🛡️ Privacy
+
+See [PRIVACY.md](PRIVACY.md) for the privacy notice.
