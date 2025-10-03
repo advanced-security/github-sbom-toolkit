@@ -13,10 +13,10 @@ purls:
 
 scoped:
   # Ignore an advisory across an entire org
-  - scope: my-org
+  - scope: github
     advisories:
       - GHSA-1111-2222-3333
   # Ignore one specific PURL (exact version) in a single repository
-  - scope: my-org/my-repo
+  - scope: github/github
     purls:
       - pkg:maven/com.example/app@1.2.3
