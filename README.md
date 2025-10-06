@@ -368,6 +368,14 @@ You can tune concurrency and increase the delay to reduce the chance of hitting 
 
 Each time a secondary rate limit is hit, the delay between fetching SBOMs is increased by 10%, to provide a way to adaptively respond to that rate limit.
 
+## Limitations & future work
+
+- Only malware advisories are synchronised from the GitHub Advisory Database, by design
+  - future work could allow synchronising from other compatible vulnerability databases to match additional ecosystems to those in the GHADB
+- Semver matching is used for all ecosystems, which may not work correctly
+- There is no continuous running mode - it runs as a one-off at the command line
+  - future work could allow running in a Docker container in this manner 
+
 ## 🤝 Contributing
 
 Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details on how to contribute to this project.
