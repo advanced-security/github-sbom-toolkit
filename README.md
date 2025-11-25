@@ -374,7 +374,9 @@ Each time a secondary rate limit is hit, the delay between fetching SBOMs is inc
   - future work could allow synchronising from other compatible vulnerability databases to match additional ecosystems to those in the GHADB
 - Semver matching is used for all ecosystems, which may not work correctly
 - There is no continuous running mode - it runs as a one-off at the command line
-  - future work could allow running in a Docker container in this manner 
+  - future work could allow running in a Docker container in this manner
+- SBOMs are only available from the Dependency Graph for the default branch
+  - an alternative way to generate SBOMs (such as with [Component Detection](https://github.com/microsoft/component-detection)) is currently needed for non-default branches
 
 ## 🤝 Contributing
 
