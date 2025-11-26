@@ -1,5 +1,6 @@
 import { createOctokit } from "./octokit.js";
 import type { RepositorySbom, CollectionSummary, SbomPackage, Sbom, BranchSbom, BranchDependencyDiff, DependencyReviewPackageChange } from "./types.js";
+import { submitSnapshotIfPossible } from "./componentSubmission.js";
 import * as semver from "semver";
 import { readAll, writeOne } from "./serialization.js";
 // p-limit lacks bundled types in some versions; declare minimal shape
@@ -28,6 +29,7 @@ export interface CollectorOptions {
   branchLimit?: number; // limit number of branches per repo (excluding default)
   includeDependencyReviewDiffs?: boolean; // fetch dependency review diff base->branch
   branchDiffBase?: string; // override base branch for diffs (defaults to default branch)
+  submitOnMissingSnapshot?: boolean; // run component detection submission when diff 404
 }
 
 export class SbomCollector {
@@ -65,6 +67,7 @@ export class SbomCollector {
       ,branchLimit: o.branchLimit ?? 20
       ,includeDependencyReviewDiffs: o.includeDependencyReviewDiffs ?? true
       ,branchDiffBase: o.branchDiffBase
+      ,submitOnMissingSnapshot: o.submitOnMissingSnapshot ?? false
     } as Required<CollectorOptions>;
 
     if (this.opts.token) {
@@ -432,8 +435,33 @@ export class SbomCollector {
       let reason = e instanceof Error ? e.message : String(e);
       if (status === 404) {
         reason = "Dependency review unavailable (missing snapshot or feature disabled)";
+        // Optional retry path: submit snapshot then retry once
+        if (this.opts.submitOnMissingSnapshot) {
+          try {
+            const ok = await this.trySubmitSnapshot(org, repo, head);
+            if (ok) {
+              await new Promise(r => setTimeout(r, 3000));
+              return await this.fetchDependencyReviewDiff(org, repo, base, head);
+            }
+          } catch (subErr) {
+            reason += ` (submission attempt failed: ${(subErr as Error).message})`;
+          }
+        }
       }
       return { base, head, retrievedAt: new Date().toISOString(), changes: [], error: reason };
+    }
+  }
+
+  private async trySubmitSnapshot(org: string, repo: string, branch: string): Promise<boolean> {
+    // Dynamically import to avoid hard dependency when submodule not present
+    try {
+      const mod = await import("./componentSubmission.js");
+      if (typeof mod.submitSnapshotIfPossible === "function") {
+        return await mod.submitSnapshotIfPossible({ owner: org, repo, branch, token: this.opts.token, baseUrl: this.opts.baseUrl, caBundlePath: this.opts.caBundlePath, quiet: this.opts.quiet });
+      }
+      return false;
+    } catch {
+      return false;
     }
   }
 

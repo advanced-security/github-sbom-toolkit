@@ -81,6 +81,36 @@ Search results will include branch matches: package PURLs annotated with `@branc
 
 If a branch SBOM or diff retrieval fails, the error is recorded but does not stop collection for other branches or repositories.
 
+#### Handling Missing Dependency Review Snapshots
+
+If the Dependency Review API returns a 404 for a branch diff (commonly due to a missing dependency snapshot on either the base or head commit), the toolkit can optionally attempt to generate and submit a snapshot using the Component Detection + Dependency Submission Action.
+
+Enable automatic submission + retry with:
+
+```bash
+--submit-on-missing-snapshot
+```
+
+This requires the action repository to be present as a git submodule (or copied) at the path:
+
+```
+component-detection-dependency-submission-action/
+```
+
+After cloning, initialize submodules:
+
+```bash
+git submodule update --init --recursive
+```
+
+Build the action (if not already built) so its `dist/entrypoint.js` exists. The toolkit will then:
+
+1. Detect 404 from diff endpoint.
+2. Invoke the action locally to produce a snapshot for the target branch.
+3. Wait briefly then retry the dependency review diff once.
+
+If submission fails, the original 404 reason is retained and collection proceeds.
+
 ### 🔑 Authentication
 
 A GitHub token with appropriate scope is required when performing network operations such as `--sync-sboms`, `--sync-malware` and `--upload-sarif`.

@@ -43,6 +43,7 @@ async function main() {
     .option("branch-limit", { type: "number", default: 10, describe: "Limit number of non-default branches to scan per repository" })
     .option("dependency-review", { type: "boolean", default: true, describe: "Fetch dependency review diffs for scanned branches" })
     .option("diff-base", { type: "string", describe: "Override base branch for dependency review diffs (defaults to default branch)" })
+    .option("submit-on-missing-snapshot", { type: "boolean", default: false, describe: "When dependency review diff returns 404 (missing snapshot), run Component Detection to submit a snapshot, then retry." })
     .check(args => {
       const syncing = !!args.syncSboms;
       if (syncing) {
@@ -110,6 +111,7 @@ async function main() {
     branchLimit: argv["branch-limit"] as number,
     includeDependencyReviewDiffs: argv["dependency-review"] as boolean,
     branchDiffBase: argv["diff-base"] as string | undefined,
+    submitOnMissingSnapshot: argv["submit-on-missing-snapshot"] as boolean,
   });
 
   if (!quiet) process.stderr.write(chalk.cyan(offline ? "Loading SBOMs from cache..." : "Collecting SBOMs from cache & GitHub...") + "\n");
