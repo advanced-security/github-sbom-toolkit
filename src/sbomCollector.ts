@@ -30,6 +30,7 @@ export interface CollectorOptions {
   includeDependencyReviewDiffs?: boolean; // fetch dependency review diff base->branch
   branchDiffBase?: string; // override base branch for diffs (defaults to default branch)
   submitOnMissingSnapshot?: boolean; // run component detection submission when diff 404
+  submitLanguages?: string[]; // limit submission to these languages
 }
 
 export class SbomCollector {
@@ -68,6 +69,7 @@ export class SbomCollector {
       ,includeDependencyReviewDiffs: o.includeDependencyReviewDiffs ?? true
       ,branchDiffBase: o.branchDiffBase
       ,submitOnMissingSnapshot: o.submitOnMissingSnapshot ?? false
+      ,submitLanguages: o.submitLanguages ?? undefined
     } as Required<CollectorOptions>;
 
     if (this.opts.token) {
@@ -457,7 +459,7 @@ export class SbomCollector {
     try {
       const mod = await import("./componentSubmission.js");
       if (typeof mod.submitSnapshotIfPossible === "function") {
-        return await mod.submitSnapshotIfPossible({ owner: org, repo, branch, token: this.opts.token, baseUrl: this.opts.baseUrl, caBundlePath: this.opts.caBundlePath, quiet: this.opts.quiet });
+        return await mod.submitSnapshotIfPossible({ owner: org, repo, branch, token: this.opts.token, baseUrl: this.opts.baseUrl, caBundlePath: this.opts.caBundlePath, quiet: this.opts.quiet, languages: this.opts.submitLanguages });
       }
       return false;
     } catch {

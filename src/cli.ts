@@ -44,6 +44,7 @@ async function main() {
     .option("dependency-review", { type: "boolean", default: true, describe: "Fetch dependency review diffs for scanned branches" })
     .option("diff-base", { type: "string", describe: "Override base branch for dependency review diffs (defaults to default branch)" })
     .option("submit-on-missing-snapshot", { type: "boolean", default: false, describe: "When dependency review diff returns 404 (missing snapshot), run Component Detection to submit a snapshot, then retry." })
+    .option("submit-languages", { type: "array", describe: "Limit snapshot submission to these languages (e.g., JavaScript,TypeScript,Python,Maven)." })
     .check(args => {
       const syncing = !!args.syncSboms;
       if (syncing) {
@@ -112,6 +113,7 @@ async function main() {
     includeDependencyReviewDiffs: argv["dependency-review"] as boolean,
     branchDiffBase: argv["diff-base"] as string | undefined,
     submitOnMissingSnapshot: argv["submit-on-missing-snapshot"] as boolean,
+    submitLanguages: (argv["submit-languages"] as string[] | undefined) || undefined,
   });
 
   if (!quiet) process.stderr.write(chalk.cyan(offline ? "Loading SBOMs from cache..." : "Collecting SBOMs from cache & GitHub...") + "\n");
