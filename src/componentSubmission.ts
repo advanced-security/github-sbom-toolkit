@@ -20,7 +20,7 @@ export interface SubmitOpts {
 export async function submitSnapshotIfPossible(opts: SubmitOpts): Promise<boolean> {
   const root = process.cwd();
   const actionDir = path.join(root, 'component-detection-dependency-submission-action');
-  const entry = path.join(actionDir, 'dist', 'entrypoint.js');
+  const entry = path.join(actionDir, 'dist/index.js');
   const fs = await import('fs');
   if (!fs.existsSync(entry)) {
     if (!opts.quiet) console.error(chalk.yellow('Component Detection action not found; ensure submodule initialized and built.'));

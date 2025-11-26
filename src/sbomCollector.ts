@@ -246,8 +246,11 @@ export class SbomCollector {
             res.defaultBranchCommitSha = pendingCommitMeta.sha;
             res.defaultBranchCommitDate = pendingCommitMeta.date;
           }
+
           // Branch scanning (optional)
           if (this.opts.includeBranches && res.defaultBranch) {
+            console.log(chalk.blue(`Scanning branches for ${fullName}...`));
+
             try {
               const branches = await this.listBranches(org, repo.name);
               const nonDefault = branches.filter(b => b.name !== res.defaultBranch);
