@@ -1,5 +1,5 @@
 import { createOctokit } from "./octokit.js";
-import type { RepositorySbom, CollectionSummary, SbomPackage, Sbom } from "./types.js";
+import type { RepositorySbom, CollectionSummary, SbomPackage, Sbom, BranchSbom, BranchDependencyDiff, DependencyReviewPackageChange } from "./types.js";
 import * as semver from "semver";
 import { readAll, writeOne } from "./serialization.js";
 // p-limit lacks bundled types in some versions; declare minimal shape
@@ -24,6 +24,10 @@ export interface CollectorOptions {
   suppressSecondaryRateLimitLogs?: boolean; // suppress secondary rate limit warning logs (so they don't break the progress bar)
   quiet?: boolean; // suppress non-error logging (does not affect progress bar)
   caBundlePath?: string; // path to PEM CA bundle for self-signed/internal certs
+  includeBranches?: boolean; // when true, fetch SBOM for non-default branches
+  branchLimit?: number; // limit number of branches per repo (excluding default)
+  includeDependencyReviewDiffs?: boolean; // fetch dependency review diff base->branch
+  branchDiffBase?: string; // override base branch for diffs (defaults to default branch)
 }
 
 export class SbomCollector {
@@ -57,6 +61,10 @@ export class SbomCollector {
       suppressSecondaryRateLimitLogs: o.suppressSecondaryRateLimitLogs ?? false,
       quiet: o.quiet ?? false,
       caBundlePath: o.caBundlePath
+      ,includeBranches: o.includeBranches ?? false
+      ,branchLimit: o.branchLimit ?? 20
+      ,includeDependencyReviewDiffs: o.includeDependencyReviewDiffs ?? true
+      ,branchDiffBase: o.branchDiffBase
     } as Required<CollectorOptions>;
 
     if (this.opts.token) {
@@ -233,6 +241,32 @@ export class SbomCollector {
             res.defaultBranchCommitSha = pendingCommitMeta.sha;
             res.defaultBranchCommitDate = pendingCommitMeta.date;
           }
+          // Branch scanning (optional)
+          if (this.opts.includeBranches && res.defaultBranch) {
+            try {
+              const branches = await this.listBranches(org, repo.name);
+              const nonDefault = branches.filter(b => b.name !== res.defaultBranch);
+              const limited = this.opts.branchLimit && this.opts.branchLimit > 0 ? nonDefault.slice(0, this.opts.branchLimit) : nonDefault;
+              const branchSboms: BranchSbom[] = [];
+              const branchDiffs: BranchDependencyDiff[] = [];
+              for (const b of limited) {
+                if (this.opts.lightDelayMs) await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
+                const bSbom = await this.fetchBranchSbom(org, repo.name, b.name, b.commit?.sha);
+                branchSboms.push(bSbom);
+                const base = this.opts.branchDiffBase || res.defaultBranch;
+                if (this.opts.includeDependencyReviewDiffs) {
+                  if (this.opts.lightDelayMs) await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
+                  const diff = await this.fetchDependencyReviewDiff(org, repo.name, base, b.name);
+                  branchDiffs.push(diff);
+                }
+              }
+              if (branchSboms.length) res.branchSboms = branchSboms;
+              if (branchDiffs.length) res.branchDiffs = branchDiffs;
+            } catch (e) {
+              // Non-fatal; annotate decision
+              this.decisions[fullName] = (this.decisions[fullName] || "") + ` (branch scan error: ${(e as Error).message})`;
+            }
+          }
           newSboms.push(res);
           if (res.error) this.summary.failedCount++; else this.summary.successCount++;
           // Write freshly fetched SBOM immediately if a cache directory is configured
@@ -340,6 +374,69 @@ export class SbomCollector {
     }
   }
 
+  private async listBranches(org: string, repo: string): Promise<{ name: string; protected?: boolean; commit?: { sha?: string } }[]> {
+    if (!this.octokit) throw new Error("No Octokit instance");
+    const branches: { name: string; protected?: boolean; commit?: { sha?: string } }[] = [];
+    const per_page = 100; let page = 1; let done = false;
+    while (!done) {
+      try {
+        const resp = await this.octokit.request("GET /repos/{owner}/{repo}/branches", { owner: org, repo, per_page, page });
+        const data = resp.data as Array<{ name: string; protected?: boolean; commit?: { sha?: string } }>;
+        branches.push(...data);
+        if (data.length < per_page) done = true; else page++;
+      } catch (e) {
+        throw new Error(`Failed listing branches for ${org}/${repo}: ${(e as Error).message}`);
+      }
+    }
+    return branches;
+  }
+
+  private async fetchBranchSbom(org: string, repo: string, branch: string, commitSha?: string): Promise<BranchSbom> {
+    if (!this.octokit) throw new Error("No Octokit instance");
+    try {
+      const resp = await this.octokit.request("GET /repos/{owner}/{repo}/dependency-graph/sbom", { owner: org, repo, ref: branch, headers: { Accept: "application/vnd.github+json" } });
+      const sbomWrapper = resp.data as { sbom?: Sbom };
+      const packages: SbomPackage[] = sbomWrapper?.sbom?.packages ?? [];
+      return { branch, commitSha, retrievedAt: new Date().toISOString(), sbom: sbomWrapper?.sbom, packages };
+    } catch (e) {
+      return { branch, commitSha, retrievedAt: new Date().toISOString(), packages: [], error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  private async fetchDependencyReviewDiff(org: string, repo: string, base: string, head: string): Promise<BranchDependencyDiff> {
+    if (!this.octokit) throw new Error("No Octokit instance");
+    try {
+      const resp = await this.octokit.request("GET /repos/{owner}/{repo}/dependency-graph/dependency-review", { owner: org, repo, base, head, headers: { Accept: "application/vnd.github+json" } });
+      // Response shape includes change_set array (per docs). We normalize to DependencyReviewPackageChange[]
+      const raw = resp.data as { change_set?: unknown[] };
+      const changes: DependencyReviewPackageChange[] = [];
+      for (const c of raw.change_set ?? []) {
+        const obj = c as Record<string, unknown>;
+        const change: DependencyReviewPackageChange = {
+          changeType: String(obj.change_type || obj.changeType || "unknown"),
+          name: obj.name as string | undefined,
+          ecosystem: obj.ecosystem as string | undefined,
+          packageURL: obj.package_url as string | undefined,
+          purl: obj.purl as string | undefined,
+          license: obj.license as string | undefined,
+          manifest: obj.manifest as string | undefined,
+          scope: obj.scope as string | undefined,
+          previousVersion: obj.previous_version as string | undefined,
+          newVersion: obj.version as string | undefined
+        };
+        changes.push(change);
+      }
+      return { base, head, retrievedAt: new Date().toISOString(), changes };
+    } catch (e) {
+      const status = (e as { status?: number })?.status;
+      let reason = e instanceof Error ? e.message : String(e);
+      if (status === 404) {
+        reason = "Dependency review unavailable (missing snapshot or feature disabled)";
+      }
+      return { base, head, retrievedAt: new Date().toISOString(), changes: [], error: reason };
+    }
+  }
+
   // New method including the query that produced each match
   searchByPurlsWithReasons(purls: string[]): Map<string, { purl: string; reason: string }[]> {
     purls = purls.map(q => q.startsWith("pkg:") ? q : `pkg:${q}`);
@@ -417,6 +514,89 @@ export class SbomCollector {
               }
             } else if (q.exact) {
               if (pLower === q.exact) { if (!found.has(p)) found.set(p, q.raw); }
+            }
+          }
+        }
+      }
+      // Include branch SBOM packages
+      if (repoSbom.branchSboms) {
+        for (const b of repoSbom.branchSboms) {
+          if (b.error) continue;
+          for (const pkg of b.packages as Array<SbomPackage & { externalRefs?: ExtRef[] }>) {
+            const refs = (pkg as { externalRefs?: ExtRef[] }).externalRefs;
+            const candidatePurls: string[] = [];
+            if (refs) for (const r of refs) if (r.referenceType === "purl" && r.referenceLocator) candidatePurls.push(r.referenceLocator);
+            if ((pkg as { purl?: string }).purl) candidatePurls.push((pkg as { purl?: string }).purl as string);
+            const unique = Array.from(new Set(candidatePurls));
+            for (const p of unique) {
+              const pLower = p.toLowerCase();
+              for (const q of queries) {
+                if (q.isPrefixWildcard) {
+                  const prefix = q.lower.slice(0, -1);
+                  if (pLower.startsWith(prefix)) { if (!found.has(`${p}@${b.branch}`)) found.set(`${p}@${b.branch}`, q.raw); }
+                  continue;
+                }
+                if (q.versionConstraint && q.type && q.name) {
+                  if (!pLower.startsWith("pkg:")) continue;
+                  const body = p.slice(4);
+                  const atIdx = body.indexOf("@");
+                  const main = atIdx >= 0 ? body.slice(0, atIdx) : body;
+                  const ver = atIdx >= 0 ? body.slice(atIdx + 1) : (pkg.version as string | undefined) || undefined;
+                  const slashIdx = main.indexOf("/");
+                  if (slashIdx < 0) continue;
+                  const pType = main.slice(0, slashIdx).toLowerCase();
+                  const pName = main.slice(slashIdx + 1);
+                  if (pType === q.type && pName.toLowerCase() === q.name.toLowerCase() && ver) {
+                    try {
+                      const coerced = semver.coerce(ver)?.version || ver;
+                      if (semver.valid(coerced) && semver.satisfies(coerced, q.versionConstraint, { includePrerelease: true })) {
+                        if (!found.has(`${p}@${b.branch}`)) found.set(`${p}@${b.branch}`, q.raw);
+                      }
+                    } catch { /* ignore */ }
+                  }
+                } else if (q.exact) {
+                  if (pLower === q.exact) { if (!found.has(`${p}@${b.branch}`)) found.set(`${p}@${b.branch}`, q.raw); }
+                }
+              }
+            }
+          }
+        }
+      }
+      // Include dependency review diff additions/updates (head packages only)
+      if (repoSbom.branchDiffs) {
+        for (const diff of repoSbom.branchDiffs) {
+          for (const change of diff.changes) {
+            if (change.changeType !== "added" && change.changeType !== "updated") continue;
+            const p = (change.purl || change.packageURL || (change.ecosystem ? `pkg:${change.ecosystem}/${change.name || ""}${change.newVersion ? "@" + change.newVersion : ""}` : undefined));
+            if (!p) continue;
+            const pLower = p.toLowerCase();
+            for (const q of queries) {
+              if (q.isPrefixWildcard) {
+                const prefix = q.lower.slice(0, -1);
+                if (pLower.startsWith(prefix)) { if (!found.has(`${p}@${diff.head}`)) found.set(`${p}@${diff.head}`, q.raw); }
+                continue;
+              }
+              if (q.versionConstraint && q.type && q.name) {
+                if (!pLower.startsWith("pkg:")) continue;
+                const body = p.slice(4);
+                const atIdx = body.indexOf("@");
+                const main = atIdx >= 0 ? body.slice(0, atIdx) : body;
+                const ver = atIdx >= 0 ? body.slice(atIdx + 1) : change.newVersion;
+                const slashIdx = main.indexOf("/");
+                if (slashIdx < 0) continue;
+                const pType = main.slice(0, slashIdx).toLowerCase();
+                const pName = main.slice(slashIdx + 1);
+                if (pType === q.type && pName.toLowerCase() === q.name.toLowerCase() && ver) {
+                  try {
+                    const coerced = semver.coerce(ver)?.version || ver;
+                    if (semver.valid(coerced) && semver.satisfies(coerced, q.versionConstraint, { includePrerelease: true })) {
+                      if (!found.has(`${p}@${diff.head}`)) found.set(`${p}@${diff.head}`, q.raw);
+                    }
+                  } catch { /* ignore */ }
+                }
+              } else if (q.exact) {
+                if (pLower === q.exact) { if (!found.has(`${p}@${diff.head}`)) found.set(`${p}@${diff.head}`, q.raw); }
+              }
             }
           }
         }

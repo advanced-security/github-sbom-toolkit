@@ -29,6 +29,7 @@ Supports human-readable, JSON, CSV and SARIF output. SARIF alerts can be uploade
   - JSON or CSV output (to stdout or file) with both search and malware matches
   - Optional SARIF 2.1.0 output per repository for malware matches with optional Code Scanning upload
 - Works with GitHub.com, GitHub Enterprise Server, GitHub Enterprise Managed Users and GitHub Enterprise Cloud with Data Residency (custom base URL)
+- Optional branch scanning: fetch SBOMs for non-default branches (limited) and compute Dependency Review diffs vs the default (or chosen base) branch
 
 ## Usage
 
@@ -54,6 +55,31 @@ Using GitHub Enterprise Server:
 ```bash
 npm run start -- --sync-sboms --enterprise ent --base-url https://github.internal/api/v3 --sbom-cache sboms --token $GHES_TOKEN
 ```
+
+### 🔀 Branch Scanning & Dependency Review
+
+Enable branch SBOM collection and dependency diffs with `--branch-scan`.
+
+Flags:
+
+```bash
+--branch-scan              # Fetch SBOMs for non-default branches
+--branch-limit <n>          # Max number of non-default branches per repo (default 10)
+--dependency-review         # Fetch dependency review diffs (enabled by default)
+--diff-base <branch>        # Override base branch for diffs (default: repository default)
+```
+
+Example: scan first 5 feature branches and diff them against `main`:
+
+```bash
+npm run start -- --sync-sboms --org my-org \
+  --sbom-cache sboms --branch-scan --branch-limit 5 \
+  --diff-base main --token $GITHUB_TOKEN
+```
+
+Search results will include branch matches: package PURLs annotated with `@branch` inside the match list (e.g. `pkg:npm/react@18.3.0@feature-x`). Dependency Review additions / updates are also searched; only added/updated head-side packages are considered.
+
+If a branch SBOM or diff retrieval fails, the error is recorded but does not stop collection for other branches or repositories.
 
 ### 🔑 Authentication
 

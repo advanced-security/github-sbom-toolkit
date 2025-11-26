@@ -39,6 +39,10 @@ async function main() {
     .option("csv", { type: "boolean", describe: "Emit results (search + malware matches) as CSV" })
     .option("ignore-file", { type: "string", describe: "Path to YAML ignore file (advisories, purls, scoped ignores)" })
     .option("ignore-unbounded-malware", { type: "boolean", default: false, describe: "Ignore malware advisories whose vulnerable range covers all versions (e.g. '*', '>=0')" })
+    .option("branch-scan", { type: "boolean", default: false, describe: "Fetch SBOMs for non-default branches (limited by --branch-limit)" })
+    .option("branch-limit", { type: "number", default: 10, describe: "Limit number of non-default branches to scan per repository" })
+    .option("dependency-review", { type: "boolean", default: true, describe: "Fetch dependency review diffs for scanned branches" })
+    .option("diff-base", { type: "string", describe: "Override base branch for dependency review diffs (defaults to default branch)" })
     .check(args => {
       const syncing = !!args.syncSboms;
       if (syncing) {
@@ -102,6 +106,10 @@ async function main() {
     suppressSecondaryRateLimitLogs: argv.suppressSecondaryRateLimitLogs as boolean,
     quiet,
     caBundlePath: argv["ca-bundle"] as string | undefined,
+    includeBranches: argv["branch-scan"] as boolean,
+    branchLimit: argv["branch-limit"] as number,
+    includeDependencyReviewDiffs: argv["dependency-review"] as boolean,
+    branchDiffBase: argv["diff-base"] as string | undefined,
   });
 
   if (!quiet) process.stderr.write(chalk.cyan(offline ? "Loading SBOMs from cache..." : "Collecting SBOMs from cache & GitHub...") + "\n");
