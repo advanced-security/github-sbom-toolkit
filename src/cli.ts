@@ -13,6 +13,7 @@ async function main() {
     .option("token", { type: "string", describe: "GitHub token with repo + security_events scope" })
     .option("enterprise", { type: "string", describe: "Enterprise slug (mutually exclusive with --org)" })
     .option("org", { type: "string", describe: "Single organization login" })
+    .option("repo", { type: "string", describe: "Single repository name" })
     .option("base-url", { type: "string", describe: "GitHub Enterprise Server base URL, e.g. https://github.mycompany.com/api/v3" })
     .option("concurrency", { type: "number", default: 5 })
     .option("sbom-delay", { type: "number", default: 3000, describe: "Delay (ms) between SBOM fetch requests" })
@@ -48,8 +49,9 @@ async function main() {
     .check(args => {
       const syncing = !!args.syncSboms;
       if (syncing) {
-        if (!args.enterprise && !args.org) throw new Error("Provide --enterprise or --org with --sync-sboms");
+        if (!args.enterprise && !args.org && !args.repo) throw new Error("Provide --enterprise, --org or --repo with --sync-sboms");
         if (args.enterprise && args.org) throw new Error("Specify only one of --enterprise or --org");
+        if (args.repo && (args.enterprise || args.org)) throw new Error("Specify only one of --enterprise, --org, or --repo");
       } else {
         if (!args.sbomCache) throw new Error("Offline mode requires --sbom-cache (omit --sync-sboms)");
       }
@@ -98,6 +100,7 @@ async function main() {
     token: token,
     enterprise: argv.enterprise as string | undefined,
     org: argv.org as string | undefined,
+    repo: argv.repo as string | undefined,
     baseUrl: argv["base-url"] as string | undefined,
     concurrency: argv.concurrency as number,
     delayMsBetweenRepos: argv["sbom-delay"] as number,

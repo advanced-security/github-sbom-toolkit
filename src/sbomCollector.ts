@@ -1,6 +1,6 @@
 import { createOctokit } from "./octokit.js";
 import type { RepositorySbom, CollectionSummary, SbomPackage, Sbom, BranchSbom, BranchDependencyDiff, DependencyReviewPackageChange } from "./types.js";
-import { submitSnapshotIfPossible } from "./componentSubmission.js";
+import { run } from "./componentSubmission.js";
 import * as semver from "semver";
 import { readAll, writeOne } from "./serialization.js";
 // p-limit lacks bundled types in some versions; declare minimal shape
@@ -13,6 +13,7 @@ export interface CollectorOptions {
   token: string | undefined; // GitHub token with repo + security_events scope
   enterprise?: string; // Enterprise slug to enumerate orgs
   org?: string; // Single org alternative
+  repo?: string; // Single repo alternative
   baseUrl?: string; // For GHES
   concurrency?: number; // parallel repo SBOM fetches
   includePrivate?: boolean;
@@ -42,8 +43,8 @@ export class SbomCollector {
   private decisions: Record<string, string> = {}; // repo -> reason
 
   constructor(options: CollectorOptions) {
-    if (!options.loadFromDir && !options.enterprise && !options.org) {
-      throw new Error("Either enterprise/org or loadFromDir must be specified");
+    if (!options.loadFromDir && !options.enterprise && !options.org && !options.repo) {
+      throw new Error("One of enterprise/org/repo or loadFromDir must be specified");
     }
     // Spread user options first then apply defaults via nullish coalescing so that
     // passing undefined does not erase defaults
@@ -52,6 +53,7 @@ export class SbomCollector {
       token: o.token,
       enterprise: o.enterprise,
       org: o.org,
+      repo: o.repo,
       baseUrl: o.baseUrl,
       concurrency: o.concurrency ?? 5,
       includePrivate: o.includePrivate ?? true,
@@ -108,8 +110,8 @@ export class SbomCollector {
   async collect(): Promise<RepositorySbom[]> {
     // Offline mode: load from directory if provided
     if (this.opts.loadFromDir) {
-      // find just the path for a single org, if given
-      const loadPath = this.opts.org ? `${this.opts.loadFromDir}/${this.opts.org}` : this.opts.loadFromDir;
+      // find just the path for a single org or repo, if given
+      const loadPath = this.opts.org ? `${this.opts.loadFromDir}/${this.opts.org}` : this.opts.repo ? `${this.opts.loadFromDir}/${this.opts.repo}` : this.opts.loadFromDir;
 
       if (!this.opts.quiet) process.stderr.write(chalk.blue(`Loading SBOMs from cache at ${loadPath}`) + "\n");
 
@@ -145,19 +147,28 @@ export class SbomCollector {
       process.stderr.write(chalk.blue(`Getting list of organizations for enterprise ${this.opts.enterprise}`) + "\n");
     }
 
-    const orgs = this.opts.org ? [this.opts.org] : await this.listEnterpriseOrgs(this.opts.enterprise!);
+    const orgs = this.opts.org ? [this.opts.org] : this.opts.enterprise ? await this.listEnterpriseOrgs(this.opts.enterprise!) : [this.opts.repo.split("/")[0]];
     this.summary.orgs = orgs;
 
     // Pre-list all repos if showing progress bar so we know the total upfront
     const orgRepoMap: Record<string, { name: string; pushed_at?: string; updated_at?: string; default_branch?: string }[]> = {};
     let totalRepos = 0;
-    for (const org of orgs) {
-      if (!this.opts.quiet) process.stderr.write(chalk.blue(`Listing repositories for org ${org}`) + "\n");
-      if (this.opts.lightDelayMs) await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
-      const repos = await this.listOrgRepos(org);
-      orgRepoMap[org] = repos;
-      totalRepos += repos.length;
+
+    if (!this.opts.repo) {
+      for (const org of orgs) {
+        if (!this.opts.quiet) process.stderr.write(chalk.blue(`Listing repositories for org ${org}`) + "\n");
+        if (this.opts.lightDelayMs) await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
+        const repos = await this.listOrgRepos(org);
+        orgRepoMap[org] = repos;
+        totalRepos += repos.length;
+      }
+    } else {
+      totalRepos = 1;
+      const [org, repoName] = this.opts.repo.split("/");
+      orgRepoMap[org] = [await this.getRepo(org, repoName)];
+      this.summary.orgs = orgs;
     }
+
     this.summary.repositoryCount = totalRepos;
 
     let processed = 0;
@@ -248,27 +259,26 @@ export class SbomCollector {
           }
 
           // Branch scanning (optional)
-          if (this.opts.includeBranches && res.defaultBranch) {
+          // TODO: do this even if we have the main SBOM, since we may not have branch diffs
+          // implement some check to see if the diff info we have is already fresher than the branch info
+          if (this.opts.includeBranches && res.sbom) {
             console.log(chalk.blue(`Scanning branches for ${fullName}...`));
 
             try {
               const branches = await this.listBranches(org, repo.name);
               const nonDefault = branches.filter(b => b.name !== res.defaultBranch);
               const limited = this.opts.branchLimit && this.opts.branchLimit > 0 ? nonDefault.slice(0, this.opts.branchLimit) : nonDefault;
-              const branchSboms: BranchSbom[] = [];
               const branchDiffs: BranchDependencyDiff[] = [];
               for (const b of limited) {
                 if (this.opts.lightDelayMs) await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
-                const bSbom = await this.fetchBranchSbom(org, repo.name, b.name, b.commit?.sha);
-                branchSboms.push(bSbom);
                 const base = this.opts.branchDiffBase || res.defaultBranch;
-                if (this.opts.includeDependencyReviewDiffs) {
+                if (!base) { console.error(chalk.red(`Cannot compute branch diff for ${fullName} branch ${b.name} because base branch is undefined.`)); continue; }
+                if (base && this.opts.includeDependencyReviewDiffs) {
                   if (this.opts.lightDelayMs) await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
                   const diff = await this.fetchDependencyReviewDiff(org, repo.name, base, b.name);
                   branchDiffs.push(diff);
                 }
               }
-              if (branchSboms.length) res.branchSboms = branchSboms;
               if (branchDiffs.length) res.branchDiffs = branchDiffs;
             } catch (e) {
               // Non-fatal; annotate decision
@@ -345,6 +355,19 @@ export class SbomCollector {
     return repos;
   }
 
+  private async getRepo(org: string, repo: string): Promise<{ name: string; pushed_at?: string; updated_at?: string; default_branch?: string }> {
+    if (!this.octokit) throw new Error("No Octokit instance");
+
+    try {
+      const resp = await this.octokit.request("GET /repos/{owner}/{repo}", { owner: org, repo });
+      const data = resp.data as { name: string; pushed_at?: string; updated_at?: string; default_branch?: string };
+      return data;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new Error(`Failed to get repo metadata for ${org}/${repo}: ${msg}`);
+    }
+  }
+
   private async fetchSbom(org: string, repo: string, repoMeta?: { pushed_at?: string; updated_at?: string; default_branch?: string }): Promise<RepositorySbom> {
     if (!this.octokit) throw new Error("No Octokit instance");
 
@@ -399,18 +422,6 @@ export class SbomCollector {
     return branches;
   }
 
-  private async fetchBranchSbom(org: string, repo: string, branch: string, commitSha?: string): Promise<BranchSbom> {
-    if (!this.octokit) throw new Error("No Octokit instance");
-    try {
-      const resp = await this.octokit.request("GET /repos/{owner}/{repo}/dependency-graph/sbom", { owner: org, repo, ref: branch, headers: { Accept: "application/vnd.github+json" } });
-      const sbomWrapper = resp.data as { sbom?: Sbom };
-      const packages: SbomPackage[] = sbomWrapper?.sbom?.packages ?? [];
-      return { branch, commitSha, retrievedAt: new Date().toISOString(), sbom: sbomWrapper?.sbom, packages };
-    } catch (e) {
-      return { branch, commitSha, retrievedAt: new Date().toISOString(), packages: [], error: e instanceof Error ? e.message : String(e) };
-    }
-  }
-
   private async fetchDependencyReviewDiff(org: string, repo: string, base: string, head: string): Promise<BranchDependencyDiff> {
     if (!this.octokit) throw new Error("No Octokit instance");
     try {
@@ -442,13 +453,16 @@ export class SbomCollector {
         reason = "Dependency review unavailable (missing snapshot or feature disabled)";
         // Optional retry path: submit snapshot then retry once
         if (this.opts.submitOnMissingSnapshot) {
+          console.log(chalk.blue(`Attempting to submit component snapshot for ${org}/${repo} branch ${head} before retrying dependency review diff...`));
           try {
             const ok = await this.trySubmitSnapshot(org, repo, head);
             if (ok) {
+              console.log(chalk.blue(`Snapshot submission attempted; waiting 3 seconds before retrying dependency review diff for ${org}/${repo} ${base}...${head}...`));
               await new Promise(r => setTimeout(r, 3000));
               return await this.fetchDependencyReviewDiff(org, repo, base, head);
             }
           } catch (subErr) {
+            console.error(chalk.red(`Snapshot submission failed for ${org}/${repo} branch ${head}: ${(subErr as Error).message}`));
             reason += ` (submission attempt failed: ${(subErr as Error).message})`;
           }
         }
@@ -457,17 +471,11 @@ export class SbomCollector {
     }
   }
 
+  // TODO: attach to 'run' from componentSubmission.ts with appropriate parameters
   private async trySubmitSnapshot(org: string, repo: string, branch: string): Promise<boolean> {
-    // Dynamically import to avoid hard dependency when submodule not present
-    try {
-      const mod = await import("./componentSubmission.js");
-      if (typeof mod.submitSnapshotIfPossible === "function") {
-        return await mod.submitSnapshotIfPossible({ owner: org, repo, branch, token: this.opts.token, baseUrl: this.opts.baseUrl, caBundlePath: this.opts.caBundlePath, quiet: this.opts.quiet, languages: this.opts.submitLanguages });
-      }
-      return false;
-    } catch {
-      return false;
-    }
+    return new Promise<boolean>(async (resolve, reject) => {
+      reject(new Error("Not implemented: snapshot submission requires additional context and is not implemented in this example."));
+    });
   }
 
   // New method including the query that produced each match
