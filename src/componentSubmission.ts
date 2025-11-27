@@ -2,15 +2,17 @@ import chalk from 'chalk';
 import { spawn, ChildProcess } from 'child_process';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import type { Context } from '@actions/github/lib/context.js'
 
-import ComponentDetection from './componentDetection';
+import ComponentDetection from './componentDetection.js';
 import {
     Snapshot,
     submitSnapshot
 } from '@github/dependency-submission-toolkit';
 
 export interface SubmitOpts {
+    octokit?: any; // Octokit instance, optional
     owner: string;
     repo: string;
     branch: string;
@@ -21,23 +23,15 @@ export interface SubmitOpts {
     languages?: string[];
 }
 
-// This helper attempts to run the Component Detection + Dependency Submission action
-// as a local script, assuming the repository has the submodule checked out at
-// `component-detection-dependency-submission-action`.
-// It falls back to returning false if not available.
 export async function submitSnapshotIfPossible(opts: SubmitOpts): Promise<boolean> {
-    const token = opts.token || process.env.GITHUB_TOKEN || '';
-    if (!token) {
-        if (!opts.quiet) console.error(chalk.red('GITHUB_TOKEN required to submit dependency snapshot'));
-        return false;
+    if (!opts.octokit) {
+        throw new Error('Octokit instance is required in opts.octokit');
     }
 
     // If languages filter provided, inspect repo languages and perform sparse checkout of relevant manifests
     if (opts.languages && opts.languages.length) {
-        const { createOctokit } = await import('./octokit.js');
-        const o = createOctokit({ token, baseUrl: opts.baseUrl });
         try {
-            const langResp = await o.request('GET /repos/{owner}/{repo}/languages', { owner: opts.owner, repo: opts.repo });
+            const langResp = await opts.octokit.request('GET /repos/{owner}/{repo}/languages', { owner: opts.owner, repo: opts.repo });
             const repoLangs = Object.keys(langResp.data || {});
             const wanted = opts.languages;
             const intersect = repoLangs.filter(l => wanted.some(w => w.toLowerCase() === l.toLowerCase()));
@@ -46,7 +40,6 @@ export async function submitSnapshotIfPossible(opts: SubmitOpts): Promise<boolea
                 return false;
             }
             // Create temp dir and sparse checkout only manifest files according to selected languages
-            const os = await import('os');
             const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cd-submission-'));
             const cwd = tmp;
             const repoUrl = (opts.baseUrl && opts.baseUrl.includes('api/v3'))
@@ -63,13 +56,14 @@ export async function submitSnapshotIfPossible(opts: SubmitOpts): Promise<boolea
             await execGit(['checkout', 'FETCH_HEAD'], { cwd });
 
             // Run the ComponentDetection module to detect components and submit snapshot
-            const ref = (await execGit(['rev-parse', 'HEAD'], { cwd }))?.stdout?.toString().trim();
-            const sha = (await execGit(['rev-parse', 'HEAD'], { cwd }))?.stdout?.toString().trim();
-            if (!sha || !ref) {
-                if (!opts.quiet) console.error(chalk.red(`Failed to determine SHA or ref for ${opts.owner}/${opts.repo} on branch ${opts.branch}`));
+            const process = await execGit(['rev-parse', 'HEAD'], { cwd });
+            const sha = process?.stdout?.toString().trim();
+
+            if (!sha) {
+                if (!opts.quiet) console.error(chalk.red(`Failed to determine SHA for ${opts.owner}/${opts.repo} on branch ${opts.branch}`));
                 return false;
             }
-            await run(path.resolve(opts.owner, opts.repo), sha, ref);
+            await run(opts.owner, opts.repo, sha, opts.branch);
 
         } catch (e) {
             if (!opts.quiet) console.error(chalk.red(`Sparse checkout failed: ${(e as Error).message}`));
@@ -125,15 +119,17 @@ function buildSparsePatterns(langs: string[]): string[] {
 
 async function execGit(args: string[], opts: { cwd: string, quiet?: boolean }): Promise<ChildProcess> {
     return await new Promise<ChildProcess>((resolve, reject) => {
-        const child = spawn('git', args, { cwd: opts.cwd, stdio: opts.quiet ? 'ignore' : 'inherit' });
+        const child = spawn('git', args, { cwd: opts.cwd, stdio: 'pipe' });
         child.on('error', reject);
         child.on('exit', code => code === 0 ? resolve(child) : reject(new Error(`git ${args.join(' ')} exit ${code}`)));
     });
 }
 
-export async function run(filePath: string, sha: string, ref: string) {
+export async function run(owner: string, repo: string, sha: string, ref: string) {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sbom-'));
+
     let manifests = await ComponentDetection.scanAndGetManifests(
-        filePath
+        tmpDir
     );
 
     // Get detector configuration inputs
@@ -148,12 +144,15 @@ export async function run(filePath: string, sha: string, ref: string) {
         url: detectorUrl,
     };
 
-    const context: Context = { payload: {}, eventName: '', sha: '', ref: '', workflow: '', action: '', actor: '', job: '', runNumber: 0, runId: 0, runAttempt: 0, apiUrl: '', serverUrl: '', graphqlUrl: '', issue: { owner: '', repo: '', number: 0 }, repo: { owner: '', repo: '' } };
-
-    context.sha = sha;
-    context.ref = ref;
-    context.job = 'github-sbom-toolkit';
-    context.runId = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
+    const context: Context = {
+        repo: { owner: owner, repo: repo },
+        job: 'github-sbom-toolkit',
+        runId: Math.floor(Math.random() * Number.MAX_SAFE_INTEGER),
+        ref: ref,
+        sha: sha,
+        // required for Context type but not used in snapshot submission
+        payload: {}, eventName: '', workflow: '', action: '', actor: '', runNumber: 0, runAttempt: 0, apiUrl: '', serverUrl: '', graphqlUrl: '', issue: { owner: '', repo: '', number: 0 }
+    };
 
     let snapshot = new Snapshot(detector, context);
 

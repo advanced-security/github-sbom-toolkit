@@ -23,10 +23,14 @@ export default class ComponentDetection {
   }
   // Get the latest release from the component-detection repo, download the tarball, and extract it
   public static async downloadLatestRelease() {
-    const statResult = fs.statSync(this.componentDetectionPath);
-    if (statResult && statResult.isFile()) {
-      console.debug(`Component-detection binary already exists at ${this.componentDetectionPath}, skipping download.`);
-      return;
+    try {
+      const statResult = fs.statSync(this.componentDetectionPath);
+      if (statResult && statResult.isFile()) {
+        console.debug(`Component-detection binary already exists at ${this.componentDetectionPath}, skipping download.`);
+        return;
+      }
+    } catch (error) {
+      // File does not exist, proceed to download
     }
 
     try {
@@ -254,7 +258,9 @@ export default class ComponentDetection {
       const latestRelease = await octokit.request("GET /repos/{owner}/{repo}/releases/latest", {owner, repo});
 
     var downloadURL: string = "";
-    const assetName = process.platform === "win32" ? "component-detection-win-x64.exe" : "component-detection-linux-x64";
+    // TODO: do we need to handle different architectures here?
+    // can we allow x64 on MacOS? We could allow an input parameter to override?
+    const assetName = process.platform === "win32" ? "component-detection-win-x64.exe" : process.platform === "linux" ? "component-detection-linux-x64" : "component-detection-osx-arm64";
     latestRelease.data.assets.forEach((asset: any) => {
       if (asset.name === assetName) {
         downloadURL = asset.browser_download_url;

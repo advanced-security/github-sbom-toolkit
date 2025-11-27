@@ -1,8 +1,8 @@
 import { createOctokit } from "./octokit.js";
-import type { RepositorySbom, CollectionSummary, SbomPackage, Sbom, BranchSbom, BranchDependencyDiff, DependencyReviewPackageChange } from "./types.js";
-import { run } from "./componentSubmission.js";
+import type { RepositorySbom, CollectionSummary, SbomPackage, Sbom, BranchDependencyDiff, DependencyReviewPackageChange } from "./types.js";
 import * as semver from "semver";
 import { readAll, writeOne } from "./serialization.js";
+import { submitSnapshotIfPossible } from "./componentSubmission.js";
 // p-limit lacks bundled types in some versions; declare minimal shape
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
@@ -455,7 +455,7 @@ export class SbomCollector {
         if (this.opts.submitOnMissingSnapshot) {
           console.log(chalk.blue(`Attempting to submit component snapshot for ${org}/${repo} branch ${head} before retrying dependency review diff...`));
           try {
-            const ok = await this.trySubmitSnapshot(org, repo, head);
+            const ok = await submitSnapshotIfPossible({ octokit: this.octokit, owner: org, repo: repo, branch: head, languages: this.opts.submitLanguages, quiet: this.opts.quiet });
             if (ok) {
               console.log(chalk.blue(`Snapshot submission attempted; waiting 3 seconds before retrying dependency review diff for ${org}/${repo} ${base}...${head}...`));
               await new Promise(r => setTimeout(r, 3000));
@@ -469,13 +469,6 @@ export class SbomCollector {
       }
       return { base, head, retrievedAt: new Date().toISOString(), changes: [], error: reason };
     }
-  }
-
-  // TODO: attach to 'run' from componentSubmission.ts with appropriate parameters
-  private async trySubmitSnapshot(org: string, repo: string, branch: string): Promise<boolean> {
-    return new Promise<boolean>(async (resolve, reject) => {
-      reject(new Error("Not implemented: snapshot submission requires additional context and is not implemented in this example."));
-    });
   }
 
   // New method including the query that produced each match

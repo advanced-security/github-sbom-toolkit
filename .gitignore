@@ -4,3 +4,4 @@ dist/
 data/
 .vscode/
 .DS_Store
+component-detection
