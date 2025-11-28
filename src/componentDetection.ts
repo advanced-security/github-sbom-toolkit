@@ -58,20 +58,10 @@ export default class ComponentDetection {
     console.info("Running component-detection");
 
     try {
-      await spawn(`${this.componentDetectionPath}`, ['scan', '--SourceDirectory', path, '--ManifestFile', this.outputPath, ...this.getComponentDetectionParameters()], { stdio: 'pipe' });
+      await spawn(`${this.componentDetectionPath}`, ['scan', '--SourceDirectory', path, '--ManifestFile', this.outputPath], { stdio: 'pipe' });
     } catch (error: any) {
       console.error(error);
     }
-  }
-
-  private static getComponentDetectionParameters(): Array<string> {
-    var parameters: Array<string> = [];
-    // parameters.push((console.getInput('directoryExclusionList')) ? ` --DirectoryExclusionList ${console.getInput('directoryExclusionList')}` : "");
-    // parameters.push((console.getInput('detectorArgs')) ? ` --DetectorArgs ${console.getInput('detectorArgs')}` : "");
-    // parameters.push((console.getInput('detectorsFilter')) ? ` --DetectorsFilter ${console.getInput('detectorsFilter')}` : "");
-    // parameters.push((console.getInput('detectorsCategories')) ? ` --DetectorCategories ${console.getInput('detectorsCategories')}` : "");
-    // parameters.push((console.getInput('dockerImagesToScan')) ? ` --DockerImagesToScan ${console.getInput('dockerImagesToScan')}` : "");
-    return parameters;
   }
 
   public static async getManifestsFromResults(): Promise<Manifest[] | undefined> {
