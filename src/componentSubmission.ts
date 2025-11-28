@@ -24,6 +24,38 @@ export interface SubmitOpts {
     componentDetectionBinPath?: string; // optional path to component-detection executable
 }
 
+export async function getLanguageIntersection(octokit: any, owner: string, repo: string, languages: string[], quiet: boolean = false): Promise<string[]> {
+    const langResp = await octokit.request('GET /repos/{owner}/{repo}/languages', { owner, repo });
+    const repoLangs = Object.keys(langResp.data || {});
+    const wanted = languages;
+    const intersect = repoLangs.filter(l => wanted.some(w => w.toLowerCase() === l.toLowerCase()));
+    if (!intersect.length) {
+        if (!quiet) console.error(chalk.yellow(`Skipping submission: none of selected languages present in repo (${repoLangs.join(', ')})`));
+        return [];
+    }
+    return intersect;
+}
+
+export async function sparseCheckout(owner: string, repo: string, branch: string, destDir: string, intersect: string[], baseUrl?: string) {
+    const cwd = destDir;
+    const repoUrl = (baseUrl && baseUrl.includes('api/v3'))
+        ? baseUrl.replace(/\/api\/v3$/, '') + `/${owner}/${repo}.git`
+        : `https://github.com/${owner}/${repo}.git`;
+    const patterns = buildSparsePatterns(intersect);
+    // init repo
+    await execGit(['init'], { cwd });
+    await execGit(['remote', 'add', 'origin', repoUrl], { cwd });
+    await execGit(['config', 'core.sparseCheckout', 'true'], { cwd });
+    fs.mkdirSync(path.join(cwd, '.git', 'info'), { recursive: true });
+    fs.writeFileSync(path.join(cwd, '.git', 'info', 'sparse-checkout'), patterns.join('\n') + '\n', 'utf8');
+    await execGit(['fetch', '--depth=1', 'origin', branch], { cwd });
+    await execGit(['checkout', 'FETCH_HEAD'], { cwd });
+
+    const process = await execGit(['rev-parse', 'HEAD'], { cwd: destDir });
+    const sha = process?.stdout?.toString().trim();
+    return sha;
+}
+
 export async function submitSnapshotIfPossible(opts: SubmitOpts): Promise<boolean> {
     if (!opts.octokit) {
         throw new Error('Octokit instance is required in opts.octokit');
@@ -32,34 +64,14 @@ export async function submitSnapshotIfPossible(opts: SubmitOpts): Promise<boolea
     // If languages filter provided, inspect repo languages and perform sparse checkout of relevant manifests
     if (opts.languages && opts.languages.length) {
         try {
-            const langResp = await opts.octokit.request('GET /repos/{owner}/{repo}/languages', { owner: opts.owner, repo: opts.repo });
-            const repoLangs = Object.keys(langResp.data || {});
-            const wanted = opts.languages;
-            const intersect = repoLangs.filter(l => wanted.some(w => w.toLowerCase() === l.toLowerCase()));
-            if (!intersect.length) {
-                if (!opts.quiet) console.error(chalk.yellow(`Skipping submission: none of selected languages present in repo (${repoLangs.join(', ')})`));
-                return false;
-            }
+            const intersect = await getLanguageIntersection(opts.octokit, opts.owner, opts.repo, opts.languages);
             // Create temp dir and sparse checkout only manifest files according to selected languages
             const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cd-submission-'));
-            const cwd = tmp;
-            const repoUrl = (opts.baseUrl && opts.baseUrl.includes('api/v3'))
-                ? opts.baseUrl.replace(/\/api\/v3$/, '') + `/${opts.owner}/${opts.repo}.git`
-                : `https://github.com/${opts.owner}/${opts.repo}.git`;
-            const patterns = buildSparsePatterns(intersect);
-            // init repo
-            await execGit(['init'], { cwd });
-            await execGit(['remote', 'add', 'origin', repoUrl], { cwd });
-            await execGit(['config', 'core.sparseCheckout', 'true'], { cwd });
-            fs.mkdirSync(path.join(cwd, '.git', 'info'), { recursive: true });
-            fs.writeFileSync(path.join(cwd, '.git', 'info', 'sparse-checkout'), patterns.join('\n') + '\n', 'utf8');
-            await execGit(['fetch', '--depth=1', 'origin', opts.branch], { cwd });
-            await execGit(['checkout', 'FETCH_HEAD'], { cwd });
+            console.log(chalk.green(`Sparse checkout into ${tmp} for languages: ${intersect.join(', ')}`));
+
+            const sha = await sparseCheckout(opts.owner, opts.repo, opts.branch, tmp, intersect, opts.baseUrl);
 
             // Run the ComponentDetection module to detect components and submit snapshot
-            const process = await execGit(['rev-parse', 'HEAD'], { cwd });
-            const sha = process?.stdout?.toString().trim();
-
             if (!sha) {
                 if (!opts.quiet) console.error(chalk.red(`Failed to determine SHA for ${opts.owner}/${opts.repo} on branch ${opts.branch}`));
                 return false;
@@ -67,7 +79,7 @@ export async function submitSnapshotIfPossible(opts: SubmitOpts): Promise<boolea
             await run(opts.owner, opts.repo, sha, opts.branch, opts.componentDetectionBinPath);
 
         } catch (e) {
-            if (!opts.quiet) console.error(chalk.red(`Sparse checkout failed: ${(e as Error).message}`));
+            if (!opts.quiet) console.error(chalk.red(`Component Detection failed: ${(e as Error).message}`));
             return false;
         }
     }

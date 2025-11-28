@@ -58,7 +58,7 @@ export default class ComponentDetection {
     console.info("Running component-detection");
 
     try {
-      await spawn(`${this.componentDetectionPath}`, ['scan', '--SourceDirectory', path, '--ManifestFile', this.outputPath, ...this.getComponentDetectionParameters()]);
+      await spawn(`${this.componentDetectionPath}`, ['scan', '--SourceDirectory', path, '--ManifestFile', this.outputPath, ...this.getComponentDetectionParameters()], { stdio: 'pipe' });
     } catch (error: any) {
       console.error(error);
     }

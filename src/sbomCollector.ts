@@ -250,6 +250,9 @@ export class SbomCollector {
         } else {
           this.decisions[fullName] = baseline ? `Fetching because missing pushed_at (${baseline.repoPushedAt} / ${repo.pushed_at})` : "Fetching because no baseline";
         }
+
+        let sbom : RepositorySbom | undefined = undefined;
+
         if (!skipped) {
           const res = await this.fetchSbom(org, repo.name, repo);
           if (this.opts.delayMsBetweenRepos) {
@@ -260,38 +263,42 @@ export class SbomCollector {
             res.defaultBranchCommitDate = pendingCommitMeta.date;
           }
 
-          // Branch scanning (optional)
-          // TODO: do this even if we have the main SBOM, since we may not have branch diffs
-          // implement some check to see if the diff info we have is already fresher than the branch info
-          if (this.opts.includeBranches && res.sbom) {
-            console.log(chalk.blue(`Scanning branches for ${fullName}...`));
+          sbom = res;
+        } else {
+          sbom = baseline;
+        }
 
-            try {
-              const branches = await this.listBranches(org, repo.name);
-              const nonDefault = branches.filter(b => b.name !== res.defaultBranch);
-              const limited = this.opts.branchLimit && this.opts.branchLimit > 0 ? nonDefault.slice(0, this.opts.branchLimit) : nonDefault;
-              const branchDiffs: BranchDependencyDiff[] = [];
-              for (const b of limited) {
+        // Branch scanning (optional)
+        // TODO: implement some check to see if the diff info we have is already fresher than the branch info
+        if (this.opts.includeBranches && sbom?.sbom) {
+
+          console.log(chalk.blue(`Scanning branches for ${fullName}...`));
+
+          try {
+            const branches = await this.listBranches(org, repo.name);
+            const nonDefault = branches.filter(b => b.name !== sbom.defaultBranch);
+            const limited = this.opts.branchLimit && this.opts.branchLimit > 0 ? nonDefault.slice(0, this.opts.branchLimit) : nonDefault;
+            const branchDiffs: BranchDependencyDiff[] = [];
+            for (const b of limited) {
+              if (this.opts.lightDelayMs) await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
+              const base = this.opts.branchDiffBase || sbom?.defaultBranch;
+              if (!base) { console.error(chalk.red(`Cannot compute branch diff for ${fullName} branch ${b.name} because base branch is undefined.`)); continue; }
+              if (base && this.opts.includeDependencyReviewDiffs) {
                 if (this.opts.lightDelayMs) await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
-                const base = this.opts.branchDiffBase || res.defaultBranch;
-                if (!base) { console.error(chalk.red(`Cannot compute branch diff for ${fullName} branch ${b.name} because base branch is undefined.`)); continue; }
-                if (base && this.opts.includeDependencyReviewDiffs) {
-                  if (this.opts.lightDelayMs) await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
-                  const diff = await this.fetchDependencyReviewDiff(org, repo.name, base, b.name);
-                  branchDiffs.push(diff);
-                }
+                const diff = await this.fetchDependencyReviewDiff(org, repo.name, base, b.name);
+                branchDiffs.push(diff);
               }
-              if (branchDiffs.length) res.branchDiffs = branchDiffs;
-            } catch (e) {
-              // Non-fatal; annotate decision
-              this.decisions[fullName] = (this.decisions[fullName] || "") + ` (branch scan error: ${(e as Error).message})`;
             }
+            if (branchDiffs.length) sbom.branchDiffs = branchDiffs;
+          } catch (e) {
+            // Non-fatal; annotate decision
+            this.decisions[fullName] = (this.decisions[fullName] || "") + ` (branch scan error: ${(e as Error).message})`;
           }
-          newSboms.push(res);
-          if (res.error) this.summary.failedCount++; else this.summary.successCount++;
+          newSboms.push(sbom);
+          if (sbom.error) this.summary.failedCount++; else this.summary.successCount++;
           // Write freshly fetched SBOM immediately if a cache directory is configured
           if (this.opts.loadFromDir && this.opts.syncSboms && this.opts.loadFromDir.length) {
-            try { writeOne(res, { outDir: this.opts.loadFromDir }); } catch { /* ignore write errors */ }
+            try { writeOne(sbom, { outDir: this.opts.loadFromDir }); } catch { /* ignore write errors */ }
           }
         }
         processed++;
