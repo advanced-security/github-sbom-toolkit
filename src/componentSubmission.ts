@@ -21,6 +21,7 @@ export interface SubmitOpts {
     caBundlePath?: string;
     quiet?: boolean;
     languages?: string[];
+    componentDetectionBinPath?: string; // optional path to component-detection executable
 }
 
 export async function submitSnapshotIfPossible(opts: SubmitOpts): Promise<boolean> {
@@ -63,7 +64,7 @@ export async function submitSnapshotIfPossible(opts: SubmitOpts): Promise<boolea
                 if (!opts.quiet) console.error(chalk.red(`Failed to determine SHA for ${opts.owner}/${opts.repo} on branch ${opts.branch}`));
                 return false;
             }
-            await run(opts.owner, opts.repo, sha, opts.branch);
+            await run(opts.owner, opts.repo, sha, opts.branch, opts.componentDetectionBinPath);
 
         } catch (e) {
             if (!opts.quiet) console.error(chalk.red(`Sparse checkout failed: ${(e as Error).message}`));
@@ -125,11 +126,12 @@ async function execGit(args: string[], opts: { cwd: string, quiet?: boolean }): 
     });
 }
 
-export async function run(owner: string, repo: string, sha: string, ref: string) {
+export async function run(owner: string, repo: string, sha: string, ref: string, componentDetectionBinPath?: string) {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sbom-'));
 
     let manifests = await ComponentDetection.scanAndGetManifests(
-        tmpDir
+        tmpDir,
+        componentDetectionBinPath
     );
 
     // Get detector configuration inputs

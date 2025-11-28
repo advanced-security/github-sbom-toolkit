@@ -32,6 +32,7 @@ export interface CollectorOptions {
   branchDiffBase?: string; // override base branch for diffs (defaults to default branch)
   submitOnMissingSnapshot?: boolean; // run component detection submission when diff 404
   submitLanguages?: string[]; // limit submission to these languages
+  componentDetectionBinPath?: string; // optional path to component-detection executable
 }
 
 export class SbomCollector {
@@ -72,6 +73,7 @@ export class SbomCollector {
       ,branchDiffBase: o.branchDiffBase
       ,submitOnMissingSnapshot: o.submitOnMissingSnapshot ?? false
       ,submitLanguages: o.submitLanguages ?? undefined
+      ,componentDetectionBinPath: o.componentDetectionBinPath
     } as Required<CollectorOptions>;
 
     if (this.opts.token) {
@@ -455,7 +457,7 @@ export class SbomCollector {
         if (this.opts.submitOnMissingSnapshot) {
           console.log(chalk.blue(`Attempting to submit component snapshot for ${org}/${repo} branch ${head} before retrying dependency review diff...`));
           try {
-            const ok = await submitSnapshotIfPossible({ octokit: this.octokit, owner: org, repo: repo, branch: head, languages: this.opts.submitLanguages, quiet: this.opts.quiet });
+            const ok = await submitSnapshotIfPossible({ octokit: this.octokit, owner: org, repo: repo, branch: head, languages: this.opts.submitLanguages, quiet: this.opts.quiet, componentDetectionBinPath: this.opts.componentDetectionBinPath });
             if (ok) {
               console.log(chalk.blue(`Snapshot submission attempted; waiting 3 seconds before retrying dependency review diff for ${org}/${repo} ${base}...${head}...`));
               await new Promise(r => setTimeout(r, 3000));

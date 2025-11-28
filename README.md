@@ -111,6 +111,37 @@ Build the action (if not already built) so its `dist/entrypoint.js` exists. The 
 
 If submission fails, the original 404 reason is retained and collection proceeds.
 
+##### Using a Local Component Detection Binary
+
+Instead of downloading the latest release automatically, you can point the toolkit at a local `component-detection` executable. This is useful if you already manage the binary or need a custom build.
+
+Pass the path via `--component-detection-bin` and optionally limit languages to reduce sparse checkout size:
+
+```bash
+npm run start -- \
+  --sync-sboms --org my-org --sbom-cache sboms \
+  --branch-scan --submit-on-missing-snapshot \
+  --submit-languages JavaScript,TypeScript \
+  --component-detection-bin /usr/local/bin/component-detection
+```
+
+GitHub Enterprise Server example:
+
+```bash
+npm run start -- \
+  --sync-sboms --org my-org --sbom-cache sboms \
+  --base-url https://ghe.example.com/api/v3 \
+  --branch-scan --submit-on-missing-snapshot \
+  --submit-languages Python \
+  --component-detection-bin /opt/tools/component-detection
+```
+
+Notes:
+
+- Providing `--component-detection-bin` skips any download logic and uses your binary directly.
+- Snapshot submission performs a language-aware sparse checkout of common manifest/lock files (e.g., `package.json`, `requirements.txt`, `pom.xml`).
+- After submission, the toolkit waits briefly and retries the dependency review diff once.
+
 ### 🔑 Authentication
 
 A GitHub token with appropriate scope is required when performing network operations such as `--sync-sboms`, `--sync-malware` and `--upload-sarif`.
@@ -153,7 +184,7 @@ npm run start -- --sbom-cache sboms --purl-file queries.txt
 npm run start -- --sync-sboms --org my-org --sbom-cache sboms
 ```
 
-2. Later offline search (no API calls; uses previously written per‑repo JSON):
+1. Later offline search (no API calls; uses previously written per‑repo JSON):
 
 ```bash
 npm run start -- --sbom-cache sboms --purl pkg:npm/react@18.2.0
@@ -397,7 +428,7 @@ npm install
 npm run build
 ```
 
-2. Run the test harness script:
+1. Run the test harness script:
 
 ```bash
 node dist/test-fixture-match.js

@@ -16,8 +16,13 @@ export default class ComponentDetection {
   public static outputPath = './output.json';
 
   // This is the default entry point for this class.
-  static async scanAndGetManifests(path: string): Promise<Manifest[] | undefined> {
-    await this.downloadLatestRelease();
+  // If executablePath is provided, use it directly and skip download.
+  static async scanAndGetManifests(path: string, executablePath?: string): Promise<Manifest[] | undefined> {
+    if (executablePath) {
+      this.componentDetectionPath = executablePath;
+    } else {
+      await this.downloadLatestRelease();
+    }
     await this.runComponentDetection(path);
     return await this.getManifestsFromResults();
   }
