@@ -114,7 +114,6 @@ async function main() {
     caBundlePath: argv["ca-bundle"] as string | undefined,
     includeBranches: argv["branch-scan"] as boolean,
     branchLimit: argv["branch-limit"] as number,
-    includeDependencyReviewDiffs: argv["dependency-review"] as boolean,
     branchDiffBase: argv["diff-base"] as string | undefined,
     submitOnMissingSnapshot: argv["submit-on-missing-snapshot"] as boolean,
     submitLanguages: (argv["submit-languages"] as string[] | undefined) || undefined,

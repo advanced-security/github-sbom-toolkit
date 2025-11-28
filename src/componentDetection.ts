@@ -9,11 +9,12 @@ import fs from 'fs'
 import { spawn } from 'child_process';
 //import dotenv from 'dotenv'
 import path from 'path';
+import { tmpdir } from 'os';
 //dotenv.config();
 
 export default class ComponentDetection {
   public static componentDetectionPath = process.platform === "win32" ? './component-detection.exe' : './component-detection';
-  public static outputPath = './output.json';
+  public static outputPath = path.join(tmpdir(), `component-detection-output-${Date.now()}.json`);
 
   // This is the default entry point for this class.
   // If executablePath is provided, use it directly and skip download.
@@ -66,6 +67,8 @@ export default class ComponentDetection {
 
   public static async getManifestsFromResults(): Promise<Manifest[] | undefined> {
     console.info("Getting manifests from results");
+    console.info(`Reading results from ${this.outputPath}`);
+    console.info(`Stat: ${fs.statSync(this.outputPath)}`);
     const results = await fs.readFileSync(this.outputPath, 'utf8');
     var json: any = JSON.parse(results);
     let dependencyGraphs: DependencyGraphs = this.normalizeDependencyGraphPaths(json.dependencyGraphs, '.');

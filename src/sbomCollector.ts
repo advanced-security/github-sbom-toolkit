@@ -28,7 +28,6 @@ export interface CollectorOptions {
   caBundlePath?: string; // path to PEM CA bundle for self-signed/internal certs
   includeBranches?: boolean; // when true, fetch SBOM for non-default branches
   branchLimit?: number; // limit number of branches per repo (excluding default)
-  includeDependencyReviewDiffs?: boolean; // fetch dependency review diff base->branch
   branchDiffBase?: string; // override base branch for diffs (defaults to default branch)
   submitOnMissingSnapshot?: boolean; // run component detection submission when diff 404
   submitLanguages?: string[]; // limit submission to these languages
@@ -69,7 +68,6 @@ export class SbomCollector {
       caBundlePath: o.caBundlePath
       ,includeBranches: o.includeBranches ?? false
       ,branchLimit: o.branchLimit ?? 20
-      ,includeDependencyReviewDiffs: o.includeDependencyReviewDiffs ?? true
       ,branchDiffBase: o.branchDiffBase
       ,submitOnMissingSnapshot: o.submitOnMissingSnapshot ?? false
       ,submitLanguages: o.submitLanguages ?? undefined
@@ -283,11 +281,10 @@ export class SbomCollector {
               if (this.opts.lightDelayMs) await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
               const base = this.opts.branchDiffBase || sbom?.defaultBranch;
               if (!base) { console.error(chalk.red(`Cannot compute branch diff for ${fullName} branch ${b.name} because base branch is undefined.`)); continue; }
-              if (base && this.opts.includeDependencyReviewDiffs) {
-                if (this.opts.lightDelayMs) await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
-                const diff = await this.fetchDependencyReviewDiff(org, repo.name, base, b.name);
-                branchDiffs.push(diff);
-              }
+              if (this.opts.lightDelayMs) await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
+              const diff = await this.fetchDependencyReviewDiff(org, repo.name, base, b.name);
+              console.log(diff);
+              branchDiffs.push(diff);
             }
             if (branchDiffs.length) sbom.branchDiffs = branchDiffs;
           } catch (e) {
@@ -434,26 +431,27 @@ export class SbomCollector {
   private async fetchDependencyReviewDiff(org: string, repo: string, base: string, head: string): Promise<BranchDependencyDiff> {
     if (!this.octokit) throw new Error("No Octokit instance");
     try {
-      const resp = await this.octokit.request("GET /repos/{owner}/{repo}/dependency-graph/dependency-review", { owner: org, repo, base, head, headers: { Accept: "application/vnd.github+json" } });
+      const basehead = `${base}...${head}`;
+      const resp = await this.octokit.request("GET /repos/{owner}/{repo}/dependency-graph/compare/{basehead}", { owner: org, repo, basehead, headers: { Accept: "application/vnd.github+json" } });
       // Response shape includes change_set array (per docs). We normalize to DependencyReviewPackageChange[]
-      const raw = resp.data as { change_set?: unknown[] };
+      const raw = resp.data;
+
       const changes: DependencyReviewPackageChange[] = [];
-      for (const c of raw.change_set ?? []) {
+      for (const c of raw) {
         const obj = c as Record<string, unknown>;
         const change: DependencyReviewPackageChange = {
-          changeType: String(obj.change_type || obj.changeType || "unknown"),
+          changeType: String(obj.change_type || "unknown"),
           name: obj.name as string | undefined,
           ecosystem: obj.ecosystem as string | undefined,
           packageURL: obj.package_url as string | undefined,
-          purl: obj.purl as string | undefined,
           license: obj.license as string | undefined,
           manifest: obj.manifest as string | undefined,
           scope: obj.scope as string | undefined,
-          previousVersion: obj.previous_version as string | undefined,
-          newVersion: obj.version as string | undefined
+          version: obj.version as string | undefined
         };
         changes.push(change);
       }
+      console.log(`Parsed dependency review diff for ${org}/${repo} ${base}...${head}: ${JSON.stringify(changes)}`);
       return { base, head, retrievedAt: new Date().toISOString(), changes };
     } catch (e) {
       const status = (e as { status?: number })?.status;
@@ -609,8 +607,8 @@ export class SbomCollector {
       if (repoSbom.branchDiffs) {
         for (const diff of repoSbom.branchDiffs) {
           for (const change of diff.changes) {
-            if (change.changeType !== "added" && change.changeType !== "updated") continue;
-            const p = (change.purl || change.packageURL || (change.ecosystem ? `pkg:${change.ecosystem}/${change.name || ""}${change.newVersion ? "@" + change.newVersion : ""}` : undefined));
+            if (change.changeType !== "added") continue;
+            const p = change.packageURL;
             if (!p) continue;
             const pLower = p.toLowerCase();
             for (const q of queries) {
