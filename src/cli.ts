@@ -47,6 +47,7 @@ async function main() {
     .option("submit-on-missing-snapshot", { type: "boolean", default: false, describe: "When dependency review diff returns 404 (missing snapshot), run Component Detection to submit a snapshot, then retry." })
     .option("submit-languages", { type: "array", describe: "Limit snapshot submission to these languages (e.g., JavaScript,TypeScript,Python,Maven)." })
     .option("component-detection-bin", { type: "string", describe: "Path to a local component-detection executable to use for snapshot submission (skips download)." })
+    .option("debug", { type: "boolean", default: false, describe: "Enable debug logging" })
     .check(args => {
       const syncing = !!args.syncSboms;
       if (syncing) {
@@ -80,6 +81,14 @@ async function main() {
     })
     .help()
     .parseAsync();
+
+  const debug = argv.debug as boolean;
+
+  if (debug) {
+    console.debug(chalk.blue("Debug logging enabled"));
+  } else {
+    console.debug = () => {};
+  }
 
   const token = argv.token as string | undefined || process.env.GITHUB_TOKEN;
 
@@ -185,7 +194,8 @@ async function main() {
       const showMalwareCli = (!wantJson && !wantCsv) || wantCli; // show only in pure CLI or combined mode
       if (showMalwareCli && !quiet) {
         for (const m of malwareMatches) {
-          process.stdout.write(`${m.repo} :: ${m.purl} => ${m.advisoryGhsaId} (${m.vulnerableVersionRange ?? "(no range)"}) {advisory: ${m.reason}} ${m.advisoryPermalink}\n`);
+          const branchInfo = m.branch ? ` [branch: ${m.branch}]` : "";
+          process.stdout.write(`${m.repo} :: ${m.purl} => ${m.advisoryGhsaId} (${m.vulnerableVersionRange ?? "(no range)"}){advisory: ${m.reason}}${branchInfo} ${m.advisoryPermalink}\n`);
         }
       }
       if (argv.sarifDir) {
@@ -275,14 +285,14 @@ async function main() {
         for (const { purl, reason } of entries) searchRows.push({ repo, purl, reason });
       }
     }
-    const malwareRows: Array<{ repo: string; purl: string; advisory: string; range: string | null; updatedAt: string }> = [];
+    const malwareRows: Array<{ repo: string; purl: string; advisory: string; range: string | null; updatedAt: string; branch: string | undefined }> = [];
     if (malwareMatches) {
       for (const m of malwareMatches) {
-        malwareRows.push({ repo: m.repo, purl: m.purl, advisory: m.advisoryGhsaId, range: m.vulnerableVersionRange, updatedAt: m.advisoryUpdatedAt });
+        malwareRows.push({ repo: m.repo, purl: m.purl, advisory: m.advisoryGhsaId, range: m.vulnerableVersionRange, updatedAt: m.advisoryUpdatedAt, branch: m.branch });
       }
     }
     // CSV columns: type,repo,purl,reason_or_advisory,range,updatedAt
-    const header = ["type", "repo", "purl", "reason_or_advisory", "range", "updatedAt"];
+    const header = ["type", "repo", "purl", "reason_or_advisory", "range", "updatedAt", "branch"];
     const sanitize = (val: unknown): string => {
       if (val === null || val === undefined) return "";
       let s = String(val);
@@ -310,7 +320,8 @@ async function main() {
         sanitize(r.purl),
         sanitize(r.advisory),
         sanitize(r.range ?? ""),
-        sanitize(r.updatedAt)
+        sanitize(r.updatedAt),
+        sanitize(r.branch ?? "")
       ].join(","));
     }
     const csvPayload = lines.join("\n") + "\n";

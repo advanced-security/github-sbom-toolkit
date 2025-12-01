@@ -33,22 +33,20 @@ async function main() {
     org,
     retrievedAt: new Date().toISOString(),
     packages: basePackages,
-    branchSboms: [
-      {
-        branch: 'feature-x',
-        retrievedAt: new Date().toISOString(),
-        packages: featurePackages
-      }
-    ],
-    branchDiffs: [
-      {
-        base: 'main',
-        head: 'feature-x',
-        retrievedAt: new Date().toISOString(),
-        changes: diffChanges
-      }
-    ]
-  };
+    // Use Map keyed by branch name per updated type
+    branchDiffs: new Map<string, any>([
+      [
+        'feature-x',
+        {
+          latestCommitDate: new Date().toISOString(),
+          base: 'main',
+          head: 'feature-x',
+          retrievedAt: new Date().toISOString(),
+          changes: diffChanges
+        }
+      ]
+    ])
+  } as RepositorySbom;
 
   fs.writeFileSync(path.join(repoDir, 'sbom.json'), JSON.stringify(synthetic, null, 2), 'utf8');
 

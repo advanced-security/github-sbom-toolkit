@@ -13,7 +13,7 @@ export function writeAll(sboms: RepositorySbom[], { outDir, flatten = false }: S
     const fileDir = path.join(outDir, repoPath);
     const filePath = flatten ? path.join(outDir, `${repoPath}.json`) : path.join(fileDir, "sbom.json");
     fs.mkdirSync(flatten ? path.dirname(filePath) : fileDir, { recursive: true });
-    fs.writeFileSync(filePath, JSON.stringify(s, null, 2), "utf8");
+    fs.writeFileSync(filePath, JSON.stringify(prepareForWrite(s), null, 2), "utf8");
   }
 }
 
@@ -22,7 +22,7 @@ export function writeOne(sbom: RepositorySbom, { outDir, flatten = false }: Seri
   const fileDir = path.join(outDir, repoPath);
   const filePath = flatten ? path.join(outDir, `${repoPath}.json`) : path.join(fileDir, "sbom.json");
   fs.mkdirSync(flatten ? path.dirname(filePath) : fileDir, { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(sbom, null, 2), "utf8");
+  fs.writeFileSync(filePath, JSON.stringify(prepareForWrite(sbom), null, 2), "utf8");
 }
 
 export interface ReadOptions {
@@ -48,7 +48,7 @@ export function readAll(dir: string, opts: ReadOptions = {}): RepositorySbom[] {
   const pushIfValid = (filePath: string) => {
     try {
       const raw = fs.readFileSync(filePath, "utf8");
-      const obj = JSON.parse(raw);
+      const obj = reviveAfterRead(JSON.parse(raw));
       if (obj && obj.repo && Array.isArray(obj.packages)) {
         results.push(obj as RepositorySbom);
       }
@@ -90,4 +90,28 @@ export function readAll(dir: string, opts: ReadOptions = {}): RepositorySbom[] {
     visit(dir);
   }
   return results;
+}
+
+// Convert Maps to plain serializable structures before JSON.stringify
+function prepareForWrite(sbom: RepositorySbom): unknown {
+  const clone: any = { ...sbom };
+  if (clone.branchDiffs instanceof Map) {
+    // store as array of diff objects for backward compatibility
+    clone.branchDiffs = Array.from(clone.branchDiffs.values());
+  }
+  return clone;
+}
+
+// Convert array representations back into Maps after JSON.parse
+function reviveAfterRead(obj: any): any {
+  if (obj && obj.branchDiffs && Array.isArray(obj.branchDiffs)) {
+    const map = new Map<string, any>();
+    for (const diff of obj.branchDiffs) {
+      if (diff && typeof diff.head === 'string') {
+        map.set(diff.head, diff);
+      }
+    }
+    obj.branchDiffs = map;
+  }
+  return obj;
 }

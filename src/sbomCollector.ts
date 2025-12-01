@@ -267,26 +267,39 @@ export class SbomCollector {
         }
 
         // Branch scanning (optional)
-        // TODO: implement some check to see if the diff info we have is already fresher than the branch info
         if (this.opts.includeBranches && sbom?.sbom) {
 
-          console.log(chalk.blue(`Scanning branches for ${fullName}...`));
+          console.debug(chalk.blue(`Scanning branches for ${fullName}...`));
 
           try {
             const branches = await this.listBranches(org, repo.name);
             const nonDefault = branches.filter(b => b.name !== sbom.defaultBranch);
             const limited = this.opts.branchLimit && this.opts.branchLimit > 0 ? nonDefault.slice(0, this.opts.branchLimit) : nonDefault;
-            const branchDiffs: BranchDependencyDiff[] = [];
+            const branchDiffs: Map<string, BranchDependencyDiff> = new Map();
             for (const b of limited) {
+
+              // get the commits, compare to the stored diff info. If the latest commit is newer, then fetch diff, otherwise skip
+              const latestCommit = await this.getLatestCommit(org, repo.name, b.name);
+              if (!latestCommit) {
+                console.error(chalk.red(`Failed to get latest commit for ${fullName} branch ${b.name}.`));
+                continue;
+              }
+              const existing = sbom?.branchDiffs instanceof Map ? sbom.branchDiffs.get(b.name) : undefined;
+              if (await this.isCommitNewer(latestCommit, existing)) {
+                console.debug(chalk.green(`Fetching branch diff for ${fullName} branch ${b.name}...`));
+              } else {
+                console.debug(chalk.yellow(`Skipping branch diff for ${fullName} branch ${b.name} (no new commits).`));
+                continue;
+              }
+
               if (this.opts.lightDelayMs) await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
               const base = this.opts.branchDiffBase || sbom?.defaultBranch;
               if (!base) { console.error(chalk.red(`Cannot compute branch diff for ${fullName} branch ${b.name} because base branch is undefined.`)); continue; }
               if (this.opts.lightDelayMs) await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
               const diff = await this.fetchDependencyReviewDiff(org, repo.name, base, b.name);
-              console.log(diff);
-              branchDiffs.push(diff);
+              branchDiffs.set(b.name, diff);
             }
-            if (branchDiffs.length) sbom.branchDiffs = branchDiffs;
+            if (branchDiffs.size) sbom.branchDiffs = branchDiffs;
           } catch (e) {
             // Non-fatal; annotate decision
             this.decisions[fullName] = (this.decisions[fullName] || "") + ` (branch scan error: ${(e as Error).message})`;
@@ -311,11 +324,32 @@ export class SbomCollector {
     return this.sboms;
   }
 
-  private async listEnterpriseOrgs(enterprise: string): Promise<string[]> {
-    // GitHub API: GET /enterprises/{enterprise}/orgs (preview might require accept header)
-
+  private async getLatestCommit(org: string, repo: string, branch: string): Promise<{ sha?: string; commitDate?: string } | null> {
     if (!this.octokit) throw new Error("No Octokit instance");
+    try {
+      const resp = await this.octokit.request("GET /repos/{owner}/{repo}/commits", { owner: org, repo, sha: branch });
+      const commitSha = resp.data?.[0]?.sha;
+      const commitDate = resp.data?.[0]?.commit?.author?.date;
+      return { sha: commitSha, commitDate };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error(`Failed to get latest commit for ${org}/${repo} branch ${branch}: ${msg}`);
+      return null;
+    }
+  }
 
+  private async isCommitNewer(latestCommit: { sha?: string; commitDate?: string }, existingDiff?: BranchDependencyDiff): Promise<boolean> {
+    if (!existingDiff || !existingDiff.latestCommitDate) {
+      return true;
+    }
+    if (latestCommit.commitDate && existingDiff.latestCommitDate) {
+      return new Date(latestCommit.commitDate) > new Date(existingDiff.latestCommitDate);
+    }
+    return false;
+  }
+
+  private async listEnterpriseOrgs(enterprise: string): Promise<string[]> {
+    if (!this.octokit) throw new Error("No Octokit instance");
     interface Org { login: string }
     try {
       const orgs: string[] = [];
@@ -338,7 +372,6 @@ export class SbomCollector {
   private async listOrgRepos(org: string): Promise<{ name: string; pushed_at?: string; updated_at?: string; default_branch?: string }[]> {
     if (!this.octokit) throw new Error("No Octokit instance");
 
-    // GET /orgs/{org}/repos
     interface RepoMeta { name: string; pushed_at?: string; updated_at?: string; default_branch?: string }
     const repos: RepoMeta[] = [];
     const per_page = 100;
@@ -451,8 +484,8 @@ export class SbomCollector {
         };
         changes.push(change);
       }
-      console.log(`Parsed dependency review diff for ${org}/${repo} ${base}...${head}: ${JSON.stringify(changes)}`);
-      return { base, head, retrievedAt: new Date().toISOString(), changes };
+      console.debug(`Parsed dependency review diff for ${org}/${repo} ${base}...${head}: ${JSON.stringify(changes)}`);
+      return { latestCommitDate: new Date().toISOString(), base, head, retrievedAt: new Date().toISOString(), changes };
     } catch (e) {
       const status = (e as { status?: number })?.status;
       let reason = e instanceof Error ? e.message : String(e);
@@ -474,7 +507,7 @@ export class SbomCollector {
           }
         }
       }
-      return { base, head, retrievedAt: new Date().toISOString(), changes: [], error: reason };
+      return { latestCommitDate: new Date().toISOString(), base, head, retrievedAt: new Date().toISOString(), changes: [], error: reason };
     }
   }
 
@@ -517,6 +550,42 @@ export class SbomCollector {
     const queries: ParsedQuery[] = purls.map(parseQuery).filter((q): q is ParsedQuery => !!q);
     const results = new Map<string, { purl: string; reason: string }[]>();
     if (!queries.length) return results;
+    const applyQueries = (candidatePurls: string[], queries: ParsedQuery[], found: Map<string, string>, branchTag?: string, fallbackVersion?: string) => {
+      const unique = Array.from(new Set(candidatePurls));
+      for (const p of unique) {
+        const pLower = p.toLowerCase();
+        const outKey = branchTag ? `${p}@${branchTag}` : p;
+        for (const q of queries) {
+          if (q.isPrefixWildcard) {
+            const prefix = q.lower.slice(0, -1);
+            if (pLower.startsWith(prefix)) { if (!found.has(outKey)) found.set(outKey, q.raw); }
+            continue;
+          }
+          if (q.versionConstraint && q.type && q.name) {
+            if (!pLower.startsWith("pkg:")) continue;
+            const body = p.slice(4);
+            const atIdx = body.indexOf("@");
+            const main = atIdx >= 0 ? body.slice(0, atIdx) : body;
+            const ver = atIdx >= 0 ? body.slice(atIdx + 1) : fallbackVersion;
+            const slashIdx = main.indexOf("/");
+            if (slashIdx < 0) continue;
+            const pType = main.slice(0, slashIdx).toLowerCase();
+            const pName = main.slice(slashIdx + 1);
+            if (pType === q.type && pName.toLowerCase() === q.name.toLowerCase() && ver) {
+              try {
+                const coerced = semver.coerce(ver)?.version || ver;
+                if (semver.valid(coerced) && semver.satisfies(coerced, q.versionConstraint, { includePrerelease: true })) {
+                  if (!found.has(outKey)) found.set(outKey, q.raw);
+                }
+              } catch { /* ignore */ }
+            }
+          } else if (q.exact) {
+            if (pLower === q.exact) { if (!found.has(outKey)) found.set(outKey, q.raw); }
+          }
+        }
+      }
+    };
+
     for (const repoSbom of this.sboms) {
       if (repoSbom.error) continue;
       interface ExtRef { referenceType: string; referenceLocator: string }
@@ -526,119 +595,18 @@ export class SbomCollector {
         const candidatePurls: string[] = [];
         if (refs) for (const r of refs) if (r.referenceType === "purl" && r.referenceLocator) candidatePurls.push(r.referenceLocator);
         if ((pkg as { purl?: string }).purl) candidatePurls.push((pkg as { purl?: string }).purl as string);
-        const unique = Array.from(new Set(candidatePurls));
-        for (const p of unique) {
-          const pLower = p.toLowerCase();
-          for (const q of queries) {
-            if (q.isPrefixWildcard) {
-              const prefix = q.lower.slice(0, -1);
-              if (pLower.startsWith(prefix)) { if (!found.has(p)) found.set(p, q.raw); }
-              continue;
-            }
-            if (q.versionConstraint && q.type && q.name) {
-              if (!pLower.startsWith("pkg:")) continue;
-              const body = p.slice(4);
-              const atIdx = body.indexOf("@");
-              const main = atIdx >= 0 ? body.slice(0, atIdx) : body;
-              const ver = atIdx >= 0 ? body.slice(atIdx + 1) : (pkg.version as string | undefined) || undefined;
-              const slashIdx = main.indexOf("/");
-              if (slashIdx < 0) continue;
-              const pType = main.slice(0, slashIdx).toLowerCase();
-              const pName = main.slice(slashIdx + 1);
-              if (pType === q.type && pName.toLowerCase() === q.name.toLowerCase() && ver) {
-                try {
-                  const coerced = semver.coerce(ver)?.version || ver;
-                  if (semver.valid(coerced) && semver.satisfies(coerced, q.versionConstraint, { includePrerelease: true })) {
-                    if (!found.has(p)) found.set(p, q.raw);
-                  }
-                } catch { /* ignore */ }
-              }
-            } else if (q.exact) {
-              if (pLower === q.exact) { if (!found.has(p)) found.set(p, q.raw); }
-            }
-          }
-        }
-      }
-      // Include branch SBOM packages
-      if (repoSbom.branchSboms) {
-        for (const b of repoSbom.branchSboms) {
-          if (b.error) continue;
-          for (const pkg of b.packages as Array<SbomPackage & { externalRefs?: ExtRef[] }>) {
-            const refs = (pkg as { externalRefs?: ExtRef[] }).externalRefs;
-            const candidatePurls: string[] = [];
-            if (refs) for (const r of refs) if (r.referenceType === "purl" && r.referenceLocator) candidatePurls.push(r.referenceLocator);
-            if ((pkg as { purl?: string }).purl) candidatePurls.push((pkg as { purl?: string }).purl as string);
-            const unique = Array.from(new Set(candidatePurls));
-            for (const p of unique) {
-              const pLower = p.toLowerCase();
-              for (const q of queries) {
-                if (q.isPrefixWildcard) {
-                  const prefix = q.lower.slice(0, -1);
-                  if (pLower.startsWith(prefix)) { if (!found.has(`${p}@${b.branch}`)) found.set(`${p}@${b.branch}`, q.raw); }
-                  continue;
-                }
-                if (q.versionConstraint && q.type && q.name) {
-                  if (!pLower.startsWith("pkg:")) continue;
-                  const body = p.slice(4);
-                  const atIdx = body.indexOf("@");
-                  const main = atIdx >= 0 ? body.slice(0, atIdx) : body;
-                  const ver = atIdx >= 0 ? body.slice(atIdx + 1) : (pkg.version as string | undefined) || undefined;
-                  const slashIdx = main.indexOf("/");
-                  if (slashIdx < 0) continue;
-                  const pType = main.slice(0, slashIdx).toLowerCase();
-                  const pName = main.slice(slashIdx + 1);
-                  if (pType === q.type && pName.toLowerCase() === q.name.toLowerCase() && ver) {
-                    try {
-                      const coerced = semver.coerce(ver)?.version || ver;
-                      if (semver.valid(coerced) && semver.satisfies(coerced, q.versionConstraint, { includePrerelease: true })) {
-                        if (!found.has(`${p}@${b.branch}`)) found.set(`${p}@${b.branch}`, q.raw);
-                      }
-                    } catch { /* ignore */ }
-                  }
-                } else if (q.exact) {
-                  if (pLower === q.exact) { if (!found.has(`${p}@${b.branch}`)) found.set(`${p}@${b.branch}`, q.raw); }
-                }
-              }
-            }
-          }
-        }
+        applyQueries(candidatePurls, queries, found, undefined, (pkg.version as string | undefined) || undefined);
       }
       // Include dependency review diff additions/updates (head packages only)
       if (repoSbom.branchDiffs) {
-        for (const diff of repoSbom.branchDiffs) {
+        const diffs = repoSbom.branchDiffs.values();
+        for (const diff of diffs) {
           for (const change of diff.changes) {
-            if (change.changeType !== "added") continue;
-            const p = change.packageURL;
-            if (!p) continue;
-            const pLower = p.toLowerCase();
-            for (const q of queries) {
-              if (q.isPrefixWildcard) {
-                const prefix = q.lower.slice(0, -1);
-                if (pLower.startsWith(prefix)) { if (!found.has(`${p}@${diff.head}`)) found.set(`${p}@${diff.head}`, q.raw); }
-                continue;
-              }
-              if (q.versionConstraint && q.type && q.name) {
-                if (!pLower.startsWith("pkg:")) continue;
-                const body = p.slice(4);
-                const atIdx = body.indexOf("@");
-                const main = atIdx >= 0 ? body.slice(0, atIdx) : body;
-                const ver = atIdx >= 0 ? body.slice(atIdx + 1) : change.newVersion;
-                const slashIdx = main.indexOf("/");
-                if (slashIdx < 0) continue;
-                const pType = main.slice(0, slashIdx).toLowerCase();
-                const pName = main.slice(slashIdx + 1);
-                if (pType === q.type && pName.toLowerCase() === q.name.toLowerCase() && ver) {
-                  try {
-                    const coerced = semver.coerce(ver)?.version || ver;
-                    if (semver.valid(coerced) && semver.satisfies(coerced, q.versionConstraint, { includePrerelease: true })) {
-                      if (!found.has(`${p}@${diff.head}`)) found.set(`${p}@${diff.head}`, q.raw);
-                    }
-                  } catch { /* ignore */ }
-                }
-              } else if (q.exact) {
-                if (pLower === q.exact) { if (!found.has(`${p}@${diff.head}`)) found.set(`${p}@${diff.head}`, q.raw); }
-              }
-            }
+            if (change.changeType !== "added" && change.changeType !== "updated") continue;
+            const candidatePurls: string[] = [];
+            if ((change as { purl?: string }).purl) candidatePurls.push((change as { purl?: string }).purl as string);
+            if (change.packageURL) candidatePurls.push(change.packageURL);
+            applyQueries(candidatePurls, queries, found, diff.head, (change as any).newVersion);
           }
         }
       }

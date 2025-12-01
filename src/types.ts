@@ -77,9 +77,8 @@ export interface RepositorySbom {
   etag?: string; // ETag from SBOM response (future: conditional requests)
   defaultBranchCommitSha?: string; // commit SHA of default branch at time of retrieval
   defaultBranchCommitDate?: string; // ISO date of that commit
-  // Branch-level SBOMs & diffs (optional when branch scanning enabled)
-  branchSboms?: BranchSbom[];
-  branchDiffs?: BranchDependencyDiff[];
+  // Branch-level diffs (optional when branch scanning enabled)
+  branchDiffs?: Map<string, BranchDependencyDiff>;
 }
 
 export interface CollectionSummary {
@@ -124,6 +123,7 @@ export interface DependencyReviewPackageChange {
 }
 
 export interface BranchDependencyDiff {
+  latestCommitDate: any;
   base: string; // base branch
   head: string; // head branch
   retrievedAt: string;
