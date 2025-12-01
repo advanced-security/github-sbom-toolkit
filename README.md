@@ -93,7 +93,7 @@ Enable automatic submission + retry with:
 
 This requires the action repository to be present as a git submodule (or copied) at the path:
 
-```
+```bash
 component-detection-dependency-submission-action/
 ```
 
@@ -382,31 +382,42 @@ Then type one PURL query per line. Entering a blank line or using Ctrl+C on a bl
 
 | Arg | Purpose |
 |------|---------|
-| `--sbom-cache <dir>` | Directory holding per-repo SBOM JSON files (required for offline mode; used as write target when syncing) |
-| `--sync-sboms` | Perform API calls to (re)collect SBOMs; without it the CLI runs offline loading cached SBOMs. Requires a GitHub token |
-| `--enterprise <slug>` / `--org <login>` | Scope selection (mutually exclusive when syncing) |
-| `--purl <purl>` | Add a PURL/range/wildcard query (repeatable) |
-| `--purl-file <file>` | File with one query per line |
-| `--json` | Emit search JSON to stdout (unless overridden by `--output-file`) |
-| `--cli` | Also emit human-readable output when producing JSON (requires `--output-file`) |
-| `--output-file <file>` | Write search JSON payload to file; required when using both `--json` and `--cli` |
-| `--interactive` | Enter interactive search prompt after initial processing |
-| `--sync-malware` | Fetch & cache malware advisories (MALWARE classification). Requires a GitHub token |
-| `--match-malware` | Match current SBOM set against cached advisories |
-| `--malware-cache <dir>` | Advisory cache directory (required with malware operations) |
-| `--malware-cutoff <ISO-date>` | Ignore advisories whose publishedAt AND updatedAt are both before this date/time (e.g. `2025-09-29` or full timestamp) |
-| `--ignore-file <path>` | YAML ignore file (advisories / purls / scoped blocks) to filter malware matches before output |
-| `--ignore-unbounded-malware` | Ignore matches whose advisory vulnerable version range covers all versions (e.g. `*`, `>=0`, `0.0.0`) |
-| `--sarif-dir <dir>` | Write SARIF 2.1.0 files per repository (with malware matches) |
-| `--upload-sarif` | Upload generated SARIF to Code Scanning (requires --match-malware & --sarif-dir and a GitHub token) |
+| `--token <token>` | GitHub token; required for `--sync-sboms`, `--sync-malware`, and `--upload-sarif` (or use `GITHUB_TOKEN`) |
+| `--enterprise <slug>` | Collect across all orgs in an Enterprise (mutually exclusive with `--org`/`--repo` when syncing) |
+| `--org <login>` | Single organization scope (mutually exclusive with `--enterprise`/`--repo` when syncing) |
+| `--repo <name>` | Single repository scope (mutually exclusive with `--enterprise`/`--org` when syncing) |
+| `--base-url <url>` | GitHub Enterprise Server REST base URL (e.g. `https://ghe.example.com/api/v3`) |
 | `--concurrency <n>` | Parallel SBOM fetches (default 5) |
-| `--sbom-delay <ms>` | Delay between SBOM fetch (dependency-graph/sbom) requests (default 5000) |
-| `--light-delay <ms>` | Delay between lightweight metadata calls (listing repos, commit head checks) (default 500) |
-| `--base-url <url>` | GitHub Enterprise Server REST base URL (ends with /api/v3) |
-| `--progress` | Show a dynamic progress bar during SBOM collection |
-| `--suppress-secondary-rate-limit-logs` | Hide secondary rate limit warning lines (automatically applied with `--progress`) |
-| `--quiet` | Suppress all non-error and non-result output (progress bar, JSON and human readable output still show) |
-| `--ca-bundle <path>` | Path to a PEM file containing one or more additional CA certificates (self‑signed / internal PKI) |
+| `--sbom-delay <ms>` | Delay between SBOM fetch requests (default 3000) |
+| `--light-delay <ms>` | Delay between lightweight metadata requests (default 100) |
+| `--sbom-cache <dir>` | Directory to read/write per‑repo SBOM JSON; required for offline mode |
+| `--sync-sboms` | Perform API calls to collect SBOMs; without it the CLI runs offline using `--sbom-cache` |
+| `--progress` | Show a progress bar during SBOM collection |
+| `--suppress-secondary-rate-limit-logs` | Suppress secondary rate limit warning logs (useful with `--progress`) |
+| `--quiet` | Suppress non‑error output (progress bar and machine output still emitted) |
+| `--ca-bundle <path>` | PEM bundle with additional CA certs for REST/GraphQL/SARIF upload |
+| `--purl <purl>` | Add a PURL / semver range / wildcard query (repeatable) |
+| `--purl-file <file>` | File with one query per line (supports comments) |
+| `--json` | Emit search results as JSON (to stdout unless `--output-file` specified) |
+| `--cli` | Also emit human‑readable output when producing JSON/CSV; requires `--output-file` to avoid mixed stdout |
+| `--csv` | Emit results (search + malware matches) as CSV (to stdout or `--output-file`) |
+| `--output-file <file>` | Write JSON/CSV output to file; required when using `--cli` with `--json` or `--csv` |
+| `--interactive` | Enter interactive PURL search prompt after initial processing |
+| `--sync-malware` | Fetch & cache malware advisories (MALWARE); requires a token |
+| `--match-malware` | Match SBOM packages against cached malware advisories |
+| `--malware-cache <dir>` | Directory to store malware advisory cache (required with malware operations) |
+| `--malware-cutoff <ISO-date>` | Exclude advisories whose `publishedAt` and `updatedAt` are both before cutoff |
+| `--ignore-file <path>` | YAML ignore file (advisories / purls / scoped blocks) to filter matches before output |
+| `--ignore-unbounded-malware` | Suppress advisories with effectively unbounded vulnerable ranges (e.g. `*`, `>=0`) |
+| `--sarif-dir <dir>` | Write SARIF 2.1.0 files per repository (for malware matches) |
+| `--upload-sarif` | Upload generated SARIF to Code Scanning (requires `--match-malware` and `--sarif-dir`) |
+| `--branch-scan` | Fetch SBOM diffs for non‑default branches (limited by `--branch-limit`) |
+| `--branch-limit <n>` | Limit number of non‑default branches scanned per repository (default 10) |
+| `--diff-base <branch>` | Override base branch for dependency review diffs (defaults to repository default branch) |
+| `--submit-on-missing-snapshot` | On diff 404, run Component Detection to submit a snapshot, then retry |
+| `--submit-languages <list>` | Limit snapshot submission to specific languages (comma‑separated) |
+| `--component-detection-bin <path>` | Path to local `component-detection` executable (skip download) |
+| `--debug` | Enable debug logging |
 
 ## Build & test
 
