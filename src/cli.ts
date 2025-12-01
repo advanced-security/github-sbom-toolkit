@@ -40,9 +40,8 @@ async function main() {
     .option("csv", { type: "boolean", describe: "Emit results (search + malware matches) as CSV" })
     .option("ignore-file", { type: "string", describe: "Path to YAML ignore file (advisories, purls, scoped ignores)" })
     .option("ignore-unbounded-malware", { type: "boolean", default: false, describe: "Ignore malware advisories whose vulnerable range covers all versions (e.g. '*', '>=0')" })
-    .option("branch-scan", { type: "boolean", default: false, describe: "Fetch SBOMs for non-default branches (limited by --branch-limit)" })
-    .option("branch-limit", { type: "number", default: 10, describe: "Limit number of non-default branches to scan per repository" })
-    .option("dependency-review", { type: "boolean", default: true, describe: "Fetch dependency review diffs for scanned branches" })
+    .option("branch-scan", { type: "boolean", default: false, describe: "Fetch SBOM diffs for non-default branches (limited by --branch-limit)" })
+    .option("branch-limit", { type: "number", default: undefined, describe: "Limit number of non-default branches to scan per repository" })
     .option("diff-base", { type: "string", describe: "Override base branch for dependency review diffs (defaults to default branch)" })
     .option("submit-on-missing-snapshot", { type: "boolean", default: false, describe: "When dependency review diff returns 404 (missing snapshot), run Component Detection to submit a snapshot, then retry." })
     .option("submit-languages", { type: "array", describe: "Limit snapshot submission to these languages (e.g., JavaScript,TypeScript,Python,Maven)." })
@@ -122,7 +121,7 @@ async function main() {
     quiet,
     caBundlePath: argv["ca-bundle"] as string | undefined,
     includeBranches: argv["branch-scan"] as boolean,
-    branchLimit: argv["branch-limit"] as number,
+    branchLimit: argv["branch-limit"] as number | undefined,
     branchDiffBase: argv["diff-base"] as string | undefined,
     submitOnMissingSnapshot: argv["submit-on-missing-snapshot"] as boolean,
     submitLanguages: (argv["submit-languages"] as string[] | undefined) || undefined,

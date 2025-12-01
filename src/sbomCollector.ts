@@ -67,7 +67,7 @@ export class SbomCollector {
       quiet: o.quiet ?? false,
       caBundlePath: o.caBundlePath,
       includeBranches: o.includeBranches ?? false,
-      branchLimit: o.branchLimit ?? 20,
+      branchLimit: o.branchLimit,
       branchDiffBase: o.branchDiffBase,
       submitOnMissingSnapshot: o.submitOnMissingSnapshot ?? false,
       submitLanguages: o.submitLanguages ?? undefined,
