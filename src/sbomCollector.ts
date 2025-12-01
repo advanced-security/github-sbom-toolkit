@@ -65,13 +65,13 @@ export class SbomCollector {
       showProgressBar: o.showProgressBar ?? false,
       suppressSecondaryRateLimitLogs: o.suppressSecondaryRateLimitLogs ?? false,
       quiet: o.quiet ?? false,
-      caBundlePath: o.caBundlePath
-      ,includeBranches: o.includeBranches ?? false
-      ,branchLimit: o.branchLimit ?? 20
-      ,branchDiffBase: o.branchDiffBase
-      ,submitOnMissingSnapshot: o.submitOnMissingSnapshot ?? false
-      ,submitLanguages: o.submitLanguages ?? undefined
-      ,componentDetectionBinPath: o.componentDetectionBinPath
+      caBundlePath: o.caBundlePath,
+      includeBranches: o.includeBranches ?? false,
+      branchLimit: o.branchLimit ?? 20,
+      branchDiffBase: o.branchDiffBase,
+      submitOnMissingSnapshot: o.submitOnMissingSnapshot ?? false,
+      submitLanguages: o.submitLanguages ?? undefined,
+      componentDetectionBinPath: o.componentDetectionBinPath
     } as Required<CollectorOptions>;
 
     if (this.opts.token) {
@@ -249,7 +249,7 @@ export class SbomCollector {
           this.decisions[fullName] = baseline ? `Fetching because missing pushed_at (${baseline.repoPushedAt} / ${repo.pushed_at})` : "Fetching because no baseline";
         }
 
-        let sbom : RepositorySbom | undefined = undefined;
+        let sbom: RepositorySbom | undefined = undefined;
 
         if (!skipped) {
           const res = await this.fetchSbom(org, repo.name, repo);

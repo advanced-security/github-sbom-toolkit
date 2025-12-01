@@ -241,31 +241,33 @@ export default class ComponentDetection {
     if (ghesMode) {
       githubToken = "";
     }
-    const octokit = new Octokit({ auth: githubToken, baseUrl: githubAPIURL, request: { fetch: fetch}, log: {
-      debug: console.debug,
-      info: console.info,
-      warn: console.warn,
-      error: console.error
-    }, });
+    const octokit = new Octokit({
+      auth: githubToken, baseUrl: githubAPIURL, request: { fetch: fetch }, log: {
+        debug: console.debug,
+        info: console.info,
+        warn: console.warn,
+        error: console.error
+      },
+    });
 
     const owner = "microsoft";
     const repo = "component-detection";
     console.debug("Attempting to download latest release from " + githubAPIURL);
 
     try {
-      const latestRelease = await octokit.request("GET /repos/{owner}/{repo}/releases/latest", {owner, repo});
+      const latestRelease = await octokit.request("GET /repos/{owner}/{repo}/releases/latest", { owner, repo });
 
-    var downloadURL: string = "";
-    // TODO: do we need to handle different architectures here?
-    // can we allow x64 on MacOS? We could allow an input parameter to override?
-    const assetName = process.platform === "win32" ? "component-detection-win-x64.exe" : process.platform === "linux" ? "component-detection-linux-x64" : "component-detection-osx-arm64";
-    latestRelease.data.assets.forEach((asset: any) => {
-      if (asset.name === assetName) {
-        downloadURL = asset.browser_download_url;
-      }
-    });
+      var downloadURL: string = "";
+      // TODO: do we need to handle different architectures here?
+      // can we allow x64 on MacOS? We could allow an input parameter to override?
+      const assetName = process.platform === "win32" ? "component-detection-win-x64.exe" : process.platform === "linux" ? "component-detection-linux-x64" : "component-detection-osx-arm64";
+      latestRelease.data.assets.forEach((asset: any) => {
+        if (asset.name === assetName) {
+          downloadURL = asset.browser_download_url;
+        }
+      });
 
-    return downloadURL;
+      return downloadURL;
     } catch (error: any) {
       console.error(error);
       console.debug(error.message);

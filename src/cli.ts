@@ -117,10 +117,10 @@ async function main() {
     branchDiffBase: argv["diff-base"] as string | undefined,
     submitOnMissingSnapshot: argv["submit-on-missing-snapshot"] as boolean,
     submitLanguages: (argv["submit-languages"] as string[] | undefined) || undefined,
-      // Pass through as part of options bag used by submission helper via collector
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore
-      componentDetectionBinPath: argv["component-detection-bin"] as string | undefined,
+    // Pass through as part of options bag used by submission helper via collector
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
+    componentDetectionBinPath: argv["component-detection-bin"] as string | undefined,
   });
 
   if (!quiet) process.stderr.write(chalk.cyan(offline ? "Loading SBOMs from cache..." : "Collecting SBOMs from cache & GitHub...") + "\n");
@@ -407,8 +407,8 @@ async function main() {
           { name: "purl", message: "Enter a PURL (blank to exit)", type: "input" }
         ]);
         if (!ans.purl) break;
-  const map = collector.searchByPurlsWithReasons([ans.purl.startsWith("pkg:") ? ans.purl : `pkg:${ans.purl}`]);
-  runSearchCli([ans.purl], map);
+        const map = collector.searchByPurlsWithReasons([ans.purl.startsWith("pkg:") ? ans.purl : `pkg:${ans.purl}`]);
+        runSearchCli([ans.purl], map);
       }
     }
   }
