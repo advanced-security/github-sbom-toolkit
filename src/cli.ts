@@ -5,6 +5,7 @@ import chalk from "chalk";
 import { SbomCollector } from "./sbomCollector.js";
 import inquirer from "inquirer"; // still used elsewhere if needed
 import readline from "readline";
+import { CollectionSummary, RepositorySbom } from "./types.js";
 const { MalwareAdvisorySync } = await import("./malwareAdvisories.js");
 
 async function main() {
@@ -54,7 +55,7 @@ async function main() {
         if (args.enterprise && args.org) throw new Error("Specify only one of --enterprise or --org");
         if (args.repo && (args.enterprise || args.org)) throw new Error("Specify only one of --enterprise, --org, or --repo");
       } else {
-        if (!args.sbomCache) throw new Error("Offline mode requires --sbom-cache (omit --sync-sboms)");
+        if (!args.sbomCache && !args.malwareCache) throw new Error("Offline mode requires --sbom-cache (omit --sync-sboms)");
       }
       // If --cli is specified in combination with JSON or CSV, require an output file to avoid mixed stdout streams.
       if (args.cli && !args.outputFile && (args.json || args.csv)) {
@@ -105,6 +106,10 @@ async function main() {
   const wantCsv = !!argv.csv;
   const hasOutputFile = !!argv.outputFile;
   const wantCli = !!argv.cli && hasOutputFile; // only allow CLI alongside machine output when writing file
+  
+  let sboms: RepositorySbom[] = [];
+  let summary: CollectionSummary;
+
   const collector = new SbomCollector({
     token: token,
     enterprise: argv.enterprise as string | undefined,
@@ -131,20 +136,23 @@ async function main() {
     componentDetectionBinPath: argv["component-detection-bin"] as string | undefined,
   });
 
-  if (!quiet) process.stderr.write(chalk.cyan(offline ? "Loading SBOMs from cache..." : "Collecting SBOMs from cache & GitHub...") + "\n");
-  const sboms = await collector.collect();
-  const summary = collector.getSummary();
-  if (!quiet) process.stderr.write(chalk.green(`Done. Success: ${summary.successCount} / ${summary.repositoryCount}. Failed: ${summary.failedCount}. Cached: ${summary.skippedCount}`) + "\n");
+  if (argv.sbomCache || argv.syncSboms) {
+    if (!quiet) process.stderr.write(chalk.cyan(offline ? "Loading SBOMs from cache..." : "Collecting SBOMs from cache & GitHub...") + "\n");
+    sboms = await collector.collect();
+    summary = collector.getSummary();
+    if (!quiet) process.stderr.write(chalk.green(`Done. Success: ${summary.successCount} / ${summary.repositoryCount}. Failed: ${summary.failedCount}. Cached: ${summary.skippedCount}`) + "\n");
+  }
 
   const mas = new MalwareAdvisorySync({
     token: token!,
     baseUrl: argv["base-url"] ? (argv["base-url"] as string).replace(/\/v3$/, "/graphql") : undefined,
     cacheDir: argv["malware-cache"] as string | undefined,
     since: argv["malware-since"] as string | undefined,
-    caBundlePath: argv["ca-bundle"] as string | undefined
+    caBundlePath: argv["ca-bundle"] as string | undefined,
+    quiet
   });
 
-  if (argv["sync-malware"]) {
+  if (argv.syncMalware) {
 
     if (!quiet) process.stderr.write(chalk.cyan("Syncing malware advisories from GitHub Advisory Database...") + "\n");
 
@@ -211,10 +219,6 @@ async function main() {
         }
       }
     }
-  }
-  // Incremental write now handled inside collector; retain legacy behavior only if user wants to force a re-write
-  if (!quiet && argv.syncSboms && argv["sbom-cache"] && summary.repositoryCount === summary.skippedCount) {
-    process.stderr.write(chalk.blue("All repositories reused from cache (no new SBOM writes).") + "\n");
   }
 
   const runSearchCli = (purls: string[], results: Map<string, { purl: string; reason: string }[]>) => {
