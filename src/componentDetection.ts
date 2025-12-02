@@ -7,10 +7,9 @@ import {
 import fetch from 'cross-fetch'
 import fs from 'fs'
 import { spawn } from 'child_process';
-//import dotenv from 'dotenv'
 import path from 'path';
 import { tmpdir } from 'os';
-//dotenv.config();
+import { StringDecoder } from 'node:string_decoder';
 
 export default class ComponentDetection {
   public static componentDetectionPath = process.platform === "win32" ? './component-detection.exe' : './component-detection';
@@ -28,7 +27,7 @@ export default class ComponentDetection {
     // make an empty file to write results into
     fs.writeFileSync(this.outputPath, '', { flag: 'w' });
 
-    if (!await this.runComponentDetection(this.outputPath)) {
+    if (!await this.runComponentDetection(path)) {
       return;
     }
 
@@ -62,31 +61,45 @@ export default class ComponentDetection {
   }
 
   // Run the component-detection CLI on the path specified
-  public static async runComponentDetection(path: string): Promise<boolean> {
+  public static runComponentDetection(path: string): Promise<boolean> {
     console.info("Running component-detection");
 
-    try {
-      const process = await spawn(`${this.componentDetectionPath}`, ['scan', '--SourceDirectory', path, '--ManifestFile', this.outputPath], { stdio: 'pipe' });
-      
-      const pid = process.pid;
+    console.debug(`Writing to output file: ${this.outputPath}`);
 
-      process.on('exit', (code) => {
-        console.info(`Component-detection process ${pid} exited with code ${code}`);
-        if (code === 0) {
-          console.info(`Component-detection completed successfully.`);
-          return true;
-        } else {
-          console.error(`Component-detection failed with exit code ${code}.`);
-          return false;
-        }
-      });
+    return new Promise<boolean>((resolve, reject) => {
+      try {
+        const child = spawn(`${this.componentDetectionPath}`, ['scan', '--SourceDirectory', path, '--ManifestFile', this.outputPath], { stdio: 'pipe' });
+        const pid = child.pid;
 
-    } catch (error: any) {
-      console.error(error);
-      return false;
-    }
+        child.on('error', (err) => {
+          console.error(`Component-detection process ${pid} error: ${err instanceof Error ? err.message : String(err)}`);
+          reject(err);
+        });
 
-    return false;
+        child.on('exit', (code) => {
+          console.info(`Component-detection process ${pid} exited with code ${code}`);
+          if (code === 0) {
+            console.info(`Component-detection completed successfully.`);
+            resolve(true);
+          } else {
+            console.error(`Component-detection failed with exit code ${code}.`);
+            const decoder = new StringDecoder('utf8');
+            const stdout = child.stdout.read();
+            const stderr = child.stderr.read();
+            if (stdout) {
+              console.error(decoder.write(stdout));
+            }
+            if (stderr) {
+              console.error(decoder.write(stderr));
+            }
+            resolve(false);
+          }
+        });
+      } catch (error: any) {
+        console.error(error);
+        reject(error);
+      }
+    });
   }
 
   public static async getManifestsFromResults(file: string): Promise<Manifest[] | undefined> {

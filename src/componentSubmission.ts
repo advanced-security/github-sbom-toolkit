@@ -3,10 +3,10 @@ import { spawn, ChildProcess } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
-import type { Context } from '@actions/github/lib/context.js'
 
 import ComponentDetection from './componentDetection.js';
 import {
+    Job,
     Snapshot,
     submitSnapshot
 } from '@github/dependency-submission-toolkit';
@@ -155,21 +155,18 @@ export async function run(owner: string, repo: string, sha: string, ref: string,
         url: detectorUrl,
     };
 
-    const context: Context = {
-        repo: { owner: owner, repo: repo },
-        job: 'github-sbom-toolkit',
-        runId: Math.floor(Math.random() * Number.MAX_SAFE_INTEGER),
-        ref: ref,
-        sha: sha,
-        // required for Context type but not used in snapshot submission
-        payload: {}, eventName: '', workflow: '', action: '', actor: '', runNumber: 0, runAttempt: 0, apiUrl: '', serverUrl: '', graphqlUrl: '', issue: { owner: '', repo: '', number: 0 }
+    const job: Job = {
+        correlator: 'github-sbom-toolkit',
+        id: Math.floor(Math.random() * Number.MAX_SAFE_INTEGER).toString()
     };
 
-    let snapshot = new Snapshot(detector, context);
+    let snapshot = new Snapshot(detector, undefined, job);
 
     manifests?.forEach((manifest) => {
         snapshot.addManifest(manifest);
     });
 
-    submitSnapshot(snapshot);
+    console.debug(snapshot.prettyJSON())
+
+    //submitSnapshot(snapshot);
 }
