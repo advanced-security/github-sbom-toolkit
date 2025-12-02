@@ -257,20 +257,9 @@ async function main() {
   const combinedPurlsRaw = [...(argv.purl as string[] ?? []), ...filePurls];
   const combinedPurls = combinedPurlsRaw.map(p => p.startsWith("pkg:") ? p : `pkg:${p}`);
 
-  console.debug(chalk.gray("Searching for purls:"));
-  console.debug(chalk.gray(combinedPurls));
-
-  console.debug(collector?.getAllSboms())
-  console.debug(sboms);
-
   let searchMap: Map<string, { purl: string; reason: string }[]> | undefined;
   if (combinedPurls.length && collector) {
     searchMap = collector.searchByPurlsWithReasons(combinedPurls);
-  }
-
-  if (searchMap) {
-    console.debug(chalk.gray("Found purls:"));
-    console.debug(chalk.gray(Array.from(searchMap.entries())));
   }
 
   if (wantJson) {
