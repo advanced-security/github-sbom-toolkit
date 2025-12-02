@@ -65,7 +65,7 @@ export async function submitSnapshotIfPossible(opts: SubmitOpts): Promise<boolea
         const intersect = await getLanguageIntersection(opts.octokit, opts.owner, opts.repo, opts.languages);
         // Create temp dir and sparse checkout only manifest files according to selected languages
         const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cd-submission-'));
-        console.log(chalk.green(`Sparse checkout into ${tmp} for languages: ${intersect.join(', ')}`));
+        console.debug(chalk.green(`Sparse checkout into ${tmp} for languages: ${intersect.join(', ')}`));
 
         const sha = await sparseCheckout(opts.owner, opts.repo, opts.branch, tmp, intersect, opts.baseUrl);
 

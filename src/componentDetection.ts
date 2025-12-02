@@ -24,8 +24,15 @@ export default class ComponentDetection {
     } else {
       await this.downloadLatestRelease();
     }
-    await this.runComponentDetection(path);
-    return await this.getManifestsFromResults();
+
+    // make an empty file to write results into
+    fs.writeFileSync(this.outputPath, '', { flag: 'w' });
+
+    if (!await this.runComponentDetection(this.outputPath)) {
+      return;
+    }
+
+    return await this.getManifestsFromResults(this.outputPath);
   }
   // Get the latest release from the component-detection repo, download the tarball, and extract it
   public static async downloadLatestRelease() {
@@ -55,21 +62,36 @@ export default class ComponentDetection {
   }
 
   // Run the component-detection CLI on the path specified
-  public static async runComponentDetection(path: string) {
+  public static async runComponentDetection(path: string): Promise<boolean> {
     console.info("Running component-detection");
 
     try {
-      await spawn(`${this.componentDetectionPath}`, ['scan', '--SourceDirectory', path, '--ManifestFile', this.outputPath], { stdio: 'pipe' });
+      const process = await spawn(`${this.componentDetectionPath}`, ['scan', '--SourceDirectory', path, '--ManifestFile', this.outputPath], { stdio: 'pipe' });
+      
+      const pid = process.pid;
+
+      process.on('exit', (code) => {
+        console.info(`Component-detection process ${pid} exited with code ${code}`);
+        if (code === 0) {
+          console.info(`Component-detection completed successfully.`);
+          return true;
+        } else {
+          console.error(`Component-detection failed with exit code ${code}.`);
+          return false;
+        }
+      });
+
     } catch (error: any) {
       console.error(error);
+      return false;
     }
+
+    return false;
   }
 
-  public static async getManifestsFromResults(): Promise<Manifest[] | undefined> {
-    console.info("Getting manifests from results");
-    console.info(`Reading results from ${this.outputPath}`);
-    console.info(`Stat: ${fs.statSync(this.outputPath)}`);
-    const results = await fs.readFileSync(this.outputPath, 'utf8');
+  public static async getManifestsFromResults(file: string): Promise<Manifest[] | undefined> {
+    console.info(`Reading results from ${file}`);
+    const results = await fs.readFileSync(file, 'utf8');
     var json: any = JSON.parse(results);
     let dependencyGraphs: DependencyGraphs = this.normalizeDependencyGraphPaths(json.dependencyGraphs, '.');
     return this.processComponentsToManifests(json.componentsFound, dependencyGraphs);

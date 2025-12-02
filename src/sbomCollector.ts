@@ -504,7 +504,6 @@ export class SbomCollector {
         };
         changes.push(change);
       }
-      console.debug(`Parsed dependency review diff for ${org}/${repo} ${base}...${head}: ${JSON.stringify(changes)}`);
       return { latestCommitDate: new Date().toISOString(), base, head, retrievedAt: new Date().toISOString(), changes };
     } catch (e) {
       const status = (e as { status?: number })?.status;
