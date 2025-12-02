@@ -30,6 +30,7 @@ export interface CollectorOptions {
   branchLimit?: number; // limit number of branches per repo (excluding default)
   branchDiffBase?: string; // override base branch for diffs (defaults to default branch)
   submitOnMissingSnapshot?: boolean; // run component detection submission when diff 404
+  forceSubmission?: boolean; // always submit snapshot for branches prior to diff
   submitLanguages?: string[]; // limit submission to these languages
   componentDetectionBinPath?: string; // optional path to component-detection executable
 }
@@ -70,6 +71,7 @@ export class SbomCollector {
       branchLimit: o.branchLimit,
       branchDiffBase: o.branchDiffBase,
       submitOnMissingSnapshot: o.submitOnMissingSnapshot ?? false,
+      forceSubmission: o.forceSubmission ?? false,
       submitLanguages: o.submitLanguages ?? undefined,
       componentDetectionBinPath: o.componentDetectionBinPath
     } as Required<CollectorOptions>;
@@ -285,7 +287,7 @@ export class SbomCollector {
                 continue;
               }
               const existing = sbom.branchDiffs instanceof Map ? sbom.branchDiffs.get(b.name) : undefined;
-              if (await this.isCommitNewer(latestCommit, existing)) {
+              if (await this.isCommitNewer(latestCommit, existing) || this.opts.forceSubmission) {
                 console.debug(chalk.green(`Fetching branch diff for ${fullName} branch ${b.name}...`));
               } else {
                 console.debug(chalk.yellow(`Skipping branch diff for ${fullName} branch ${b.name} (no new commits).`));
@@ -300,6 +302,17 @@ export class SbomCollector {
               const base = this.opts.branchDiffBase || sbom?.defaultBranch;
               if (!base) { console.error(chalk.red(`Cannot compute branch diff for ${fullName} branch ${b.name} because base branch is undefined.`)); continue; }
               if (this.opts.lightDelayMs) await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
+              // Optionally perform dependency submission up front for the branch
+              if (this.opts.forceSubmission) {
+                try {
+                  console.log(chalk.blue(`Force-submission enabled: submitting component snapshot for ${fullName} branch ${b.name}...`));
+                  await submitSnapshotIfPossible({ octokit: this.octokit, owner: org, repo: repo.name, branch: b.name, languages: this.opts.submitLanguages, quiet: this.opts.quiet, componentDetectionBinPath: this.opts.componentDetectionBinPath });
+                  // brief delay to allow snapshot ingestion
+                  await new Promise(r => setTimeout(r, 1500));
+                } catch (subErr) {
+                  console.error(chalk.red(`Force submission failed for ${fullName} branch ${b.name}: ${(subErr as Error).message}`));
+                }
+              }
               const diff = await this.fetchDependencyReviewDiff(org, repo.name, base, b.name);
               branchDiffs.set(b.name, diff);
             }

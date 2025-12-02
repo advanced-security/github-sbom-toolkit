@@ -24,11 +24,11 @@ export interface SubmitOpts {
     componentDetectionBinPath?: string; // optional path to component-detection executable
 }
 
-export async function getLanguageIntersection(octokit: any, owner: string, repo: string, languages: string[], quiet: boolean = false): Promise<string[]> {
+export async function getLanguageIntersection(octokit: any, owner: string, repo: string, languages: string[] | undefined, quiet: boolean = false): Promise<string[]> {
     const langResp = await octokit.request('GET /repos/{owner}/{repo}/languages', { owner, repo });
     const repoLangs = Object.keys(langResp.data || {});
     const wanted = languages;
-    const intersect = repoLangs.filter(l => wanted.some(w => w.toLowerCase() === l.toLowerCase()));
+    const intersect = wanted ? repoLangs.filter(l => wanted.some(w => w.toLowerCase() === l.toLowerCase())) : repoLangs;
     if (!intersect.length) {
         if (!quiet) console.error(chalk.yellow(`Skipping submission: none of selected languages present in repo (${repoLangs.join(', ')})`));
         return [];
@@ -61,27 +61,24 @@ export async function submitSnapshotIfPossible(opts: SubmitOpts): Promise<boolea
         throw new Error('Octokit instance is required in opts.octokit');
     }
 
-    // If languages filter provided, inspect repo languages and perform sparse checkout of relevant manifests
-    if (opts.languages && opts.languages.length) {
-        try {
-            const intersect = await getLanguageIntersection(opts.octokit, opts.owner, opts.repo, opts.languages);
-            // Create temp dir and sparse checkout only manifest files according to selected languages
-            const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cd-submission-'));
-            console.log(chalk.green(`Sparse checkout into ${tmp} for languages: ${intersect.join(', ')}`));
+    try {
+        const intersect = await getLanguageIntersection(opts.octokit, opts.owner, opts.repo, opts.languages);
+        // Create temp dir and sparse checkout only manifest files according to selected languages
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cd-submission-'));
+        console.log(chalk.green(`Sparse checkout into ${tmp} for languages: ${intersect.join(', ')}`));
 
-            const sha = await sparseCheckout(opts.owner, opts.repo, opts.branch, tmp, intersect, opts.baseUrl);
+        const sha = await sparseCheckout(opts.owner, opts.repo, opts.branch, tmp, intersect, opts.baseUrl);
 
-            // Run the ComponentDetection module to detect components and submit snapshot
-            if (!sha) {
-                if (!opts.quiet) console.error(chalk.red(`Failed to determine SHA for ${opts.owner}/${opts.repo} on branch ${opts.branch}`));
-                return false;
-            }
-            await run(opts.owner, opts.repo, sha, opts.branch, opts.componentDetectionBinPath);
-
-        } catch (e) {
-            if (!opts.quiet) console.error(chalk.red(`Component Detection failed: ${(e as Error).message}`));
+        // Run the ComponentDetection module to detect components and submit snapshot
+        if (!sha) {
+            if (!opts.quiet) console.error(chalk.red(`Failed to determine SHA for ${opts.owner}/${opts.repo} on branch ${opts.branch}`));
             return false;
         }
+        await run(opts.owner, opts.repo, sha, opts.branch, opts.componentDetectionBinPath);
+
+    } catch (e) {
+        if (!opts.quiet) console.error(chalk.red(`Component Detection failed: ${(e as Error).message}`));
+        return false;
     }
 
     return false;

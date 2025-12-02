@@ -49,6 +49,7 @@ async function main() {
     .option("submit-on-missing-snapshot", { type: "boolean", default: false, describe: "When dependency review diff returns 404 (missing snapshot), run Component Detection to submit a snapshot, then retry." })
     .option("submit-languages", { type: "array", describe: "Limit snapshot submission to these languages (e.g., JavaScript,TypeScript,Python,Maven)." })
     .option("component-detection-bin", { type: "string", describe: "Path to a local component-detection executable to use for snapshot submission (skips download)." })
+    .option("force-submission", { type: "boolean", default: false, describe: "Always run Dependency Submission for scanned branches before fetching diffs." })
     .option("debug", { type: "boolean", default: false, describe: "Enable debug logging" })
     .check(args => {
       const syncing = !!args.syncSboms;
@@ -134,6 +135,7 @@ async function main() {
     branchLimit: argv["branch-limit"] as number | undefined,
     branchDiffBase: argv["diff-base"] as string | undefined,
     submitOnMissingSnapshot: argv["submit-on-missing-snapshot"] as boolean,
+    forceSubmission: argv["force-submission"] as boolean,
     submitLanguages: (argv["submit-languages"] as string[] | undefined) || undefined,
     // Pass through as part of options bag used by submission helper via collector
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
