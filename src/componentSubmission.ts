@@ -74,7 +74,7 @@ export async function submitSnapshotIfPossible(opts: SubmitOpts): Promise<boolea
             if (!opts.quiet) console.error(chalk.red(`Failed to determine SHA for ${opts.owner}/${opts.repo} on branch ${opts.branch}`));
             return false;
         }
-        await run(opts.owner, opts.repo, sha, opts.branch, opts.componentDetectionBinPath);
+        await run(tmp, opts.owner, opts.repo, sha, opts.branch, opts.componentDetectionBinPath);
 
     } catch (e) {
         if (!opts.quiet) console.error(chalk.red(`Component Detection failed: ${(e as Error).message}`));
@@ -135,8 +135,7 @@ async function execGit(args: string[], opts: { cwd: string, quiet?: boolean }): 
     });
 }
 
-export async function run(owner: string, repo: string, sha: string, ref: string, componentDetectionBinPath?: string) {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sbom-'));
+export async function run(tmpDir: string, owner: string, repo: string, sha: string, ref: string, componentDetectionBinPath?: string) {
 
     let manifests = await ComponentDetection.scanAndGetManifests(
         tmpDir,

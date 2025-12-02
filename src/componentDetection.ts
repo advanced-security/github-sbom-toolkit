@@ -62,7 +62,7 @@ export default class ComponentDetection {
 
   // Run the component-detection CLI on the path specified
   public static runComponentDetection(path: string): Promise<boolean> {
-    console.info("Running component-detection");
+    console.info(`Running component-detection on ${path}`);
 
     console.debug(`Writing to output file: ${this.outputPath}`);
 
