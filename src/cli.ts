@@ -54,8 +54,10 @@ async function main() {
         if (!args.enterprise && !args.org && !args.repo) throw new Error("Provide --enterprise, --org or --repo with --sync-sboms");
         if (args.enterprise && args.org) throw new Error("Specify only one of --enterprise or --org");
         if (args.repo && (args.enterprise || args.org)) throw new Error("Specify only one of --enterprise, --org, or --repo");
+         if (!args.sbomCache) throw new Error("--sync-sboms requires --sbom-cache to write updated SBOMs to disk");
       } else {
-        if (!args.sbomCache && !args.malwareCache) throw new Error("Offline mode requires --sbom-cache (omit --sync-sboms)");
+        const malwareOnly = !!args["sync-malware"] && !args.sbomCache && !args.purl && !args["purl-file"] && !args["match-malware"] && !args.uploadSarif && !args.interactive;
+        if (!malwareOnly && !args.sbomCache) throw new Error("Offline mode requires --sbom-cache unless running --sync-malware by itself");
       }
       // If --cli is specified in combination with JSON or CSV, require an output file to avoid mixed stdout streams.
       if (args.cli && !args.outputFile && (args.json || args.csv)) {
@@ -108,9 +110,10 @@ async function main() {
   const wantCli = !!argv.cli && hasOutputFile; // only allow CLI alongside machine output when writing file
   
   let sboms: RepositorySbom[] = [];
-  let summary: CollectionSummary;
+  let summary: CollectionSummary | undefined;
 
-  const collector = new SbomCollector({
+  const needCollector = !!argv.syncSboms || !!argv.sbomCache || !!argv.purl || !!argv["purl-file"] || !!argv["match-malware"] || !!argv.uploadSarif || !!argv.interactive;
+  const collector = needCollector ? new SbomCollector({
     token: token,
     enterprise: argv.enterprise as string | undefined,
     org: argv.org as string | undefined,
@@ -134,9 +137,9 @@ async function main() {
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
     // @ts-ignore
     componentDetectionBinPath: argv["component-detection-bin"] as string | undefined,
-  });
+  }) : undefined;
 
-  if (argv.sbomCache || argv.syncSboms) {
+  if (collector && (argv.sbomCache || argv.syncSboms)) {
     if (!quiet) process.stderr.write(chalk.cyan(offline ? "Loading SBOMs from cache..." : "Collecting SBOMs from cache & GitHub...") + "\n");
     sboms = await collector.collect();
     summary = collector.getSummary();
@@ -252,7 +255,7 @@ async function main() {
   const combinedPurlsRaw = [...(argv.purl as string[] ?? []), ...filePurls];
   const combinedPurls = combinedPurlsRaw.map(p => p.startsWith("pkg:") ? p : `pkg:${p}`);
   let searchMap: Map<string, { purl: string; reason: string }[]> | undefined;
-  if (combinedPurls.length) {
+  if (combinedPurls.length && collector) {
     searchMap = collector.searchByPurlsWithReasons(combinedPurls);
   }
   if (wantJson) {
@@ -402,6 +405,11 @@ async function main() {
         }
         const list = trimmed.split(/[\s,]+/).filter(Boolean);
         try {
+          if (!collector) {
+            console.error(chalk.red("Interactive search requires SBOMs; provide --sbom-cache or run with --sync-sboms."));
+            rl.prompt();
+            return;
+          }
           const map = collector.searchByPurlsWithReasons(list.map(p => p.startsWith("pkg:") ? p : `pkg:${p}`));
           runSearchCli(list, map);
         } catch (e) {
@@ -421,6 +429,10 @@ async function main() {
           { name: "purl", message: "Enter a PURL (blank to exit)", type: "input" }
         ]);
         if (!ans.purl) break;
+        if (!collector) {
+          console.error(chalk.red("Interactive search requires SBOMs; provide --sbom-cache or run with --sync-sboms."));
+          continue;
+        }
         const map = collector.searchByPurlsWithReasons([ans.purl.startsWith("pkg:") ? ans.purl : `pkg:${ans.purl}`]);
         runSearchCli([ans.purl], map);
       }

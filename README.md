@@ -208,6 +208,12 @@ Offline match with already-cached malware advisories (no network calls):
 
 ```bash
 npm run start -- --sbom-cache sboms --malware-cache malware-cache --match-malware
+
+Malware-only advisory sync (no SBOM cache required):
+
+```bash
+npm run start -- --sync-malware --malware-cache malware-cache --token $GITHUB_TOKEN
+```
 ```
 
 Write malware matches (and optionally search results later) to a JSON file using `--output-file`:
@@ -217,6 +223,16 @@ npm run start -- --sbom-cache sboms --malware-cache malware-cache --match-malwar
 ```
 
 If you also perform a search in the same invocation (add `--purl` or `--purl-file`), the JSON file will contain both `malwareMatches` and `search` top-level keys.
+
+#### Advisory Rate Limit Handling
+
+Advisory sync uses GitHub GraphQL with adaptive retry/backoff to handle secondary rate limits and transient errors:
+
+- Retries on `403` secondary rate limit, `429`, and `5xx` responses.
+- Honors `Retry-After` when provided; otherwise uses exponential backoff with jitter.
+- Respects `--quiet` to suppress retry log messages.
+
+If retries are exhausted, the sync aborts gracefully and leaves previously cached advisories intact.
 
 #### Ignoring Matches
 
