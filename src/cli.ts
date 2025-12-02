@@ -6,7 +6,9 @@ import { SbomCollector } from "./sbomCollector.js";
 import inquirer from "inquirer"; // still used elsewhere if needed
 import readline from "readline";
 import { CollectionSummary, RepositorySbom } from "./types.js";
-const { MalwareAdvisorySync } = await import("./malwareAdvisories.js");
+import { MalwareAdvisorySync } from "./malwareAdvisories.js";
+import { MalwareMatch } from "./malwareMatcher.js";
+import fs from "fs";
 
 async function main() {
   const argv = await yargs(hideBin(process.argv))
@@ -156,14 +158,14 @@ async function main() {
   });
 
   if (argv.syncMalware) {
-
     if (!quiet) process.stderr.write(chalk.cyan("Syncing malware advisories from GitHub Advisory Database...") + "\n");
 
     const { added, updated, total } = await mas.sync();
     if (!quiet) process.stderr.write(chalk.green(`Malware advisories sync complete. Added: ${added}, Updated: ${updated}, Total cached: ${total}`) + "\n");
   }
 
-  let malwareMatches: import("./malwareMatcher.js").MalwareMatch[] | undefined;
+  let malwareMatches: MalwareMatch[] = [];
+
   if (argv["match-malware"]) {
     const { matchMalware, buildSarifPerRepo, writeSarifFiles, uploadSarifPerRepo } = await import("./malwareMatcher.js");
     malwareMatches = matchMalware(mas.getAdvisories(), sboms, { advisoryDateCutoff: argv["malware-cutoff"] as string | undefined });
@@ -254,16 +256,28 @@ async function main() {
   }
   const combinedPurlsRaw = [...(argv.purl as string[] ?? []), ...filePurls];
   const combinedPurls = combinedPurlsRaw.map(p => p.startsWith("pkg:") ? p : `pkg:${p}`);
+
+  console.debug(chalk.gray("Searching for purls:"));
+  console.debug(chalk.gray(combinedPurls));
+
+  console.debug(collector?.getAllSboms())
+  console.debug(sboms);
+
   let searchMap: Map<string, { purl: string; reason: string }[]> | undefined;
   if (combinedPurls.length && collector) {
     searchMap = collector.searchByPurlsWithReasons(combinedPurls);
   }
+
+  if (searchMap) {
+    console.debug(chalk.gray("Found purls:"));
+    console.debug(chalk.gray(Array.from(searchMap.entries())));
+  }
+
   if (wantJson) {
     const jsonSearch = Array.from((searchMap || new Map()).entries()).map(([repo, entries]) => ({ repo, matches: entries }));
     if (hasOutputFile) {
       try {
-        const fs = await import("fs");
-        let existing: { search?: unknown; malwareMatches?: import("./malwareMatcher.js").MalwareMatch[] } = {};
+        let existing: { search?: unknown; malwareMatches?: MalwareMatch[] } = {};
         if (fs.existsSync(argv.outputFile as string)) {
           try { existing = JSON.parse(fs.readFileSync(argv.outputFile as string, "utf8")); } catch { existing = {}; }
         }

@@ -266,6 +266,8 @@ export class SbomCollector {
           sbom = baseline;
         }
 
+        console.debug(sbom);
+
         // Branch scanning (optional)
         if (this.opts.includeBranches && sbom?.sbom) {
 
@@ -303,19 +305,25 @@ export class SbomCollector {
           } catch (e) {
             // Non-fatal; annotate decision
             this.decisions[fullName] = (this.decisions[fullName] || "") + ` (branch scan error: ${(e as Error).message})`;
+            console.debug((e as Error).message);
           }
-          newSboms.push(sbom);
+          console.debug(sbom);
           if (sbom.error) this.summary.failedCount++; else this.summary.successCount++;
           // Write freshly fetched SBOM immediately if a cache directory is configured
           if (this.opts.loadFromDir && this.opts.syncSboms && this.opts.loadFromDir.length) {
             try { writeOne(sbom, { outDir: this.opts.loadFromDir }); } catch { /* ignore write errors */ }
           }
         }
+        if (sbom) {
+          newSboms.push(sbom);
+        }
         processed++;
         renderBar();
       }));
       await Promise.all(tasks);
-      newSboms = newSboms.filter(s => repoNames.has(s.repo));
+      console.debug(repoNames);
+      newSboms = newSboms.filter(s => repoNames.has(s.repo) || repoNames.has(s.repo.split("/")[1]));
+      console.debug(newSboms);
       this.sboms.push(...newSboms);
     }
     if (this.opts.showProgressBar) process.stdout.write("\n");
@@ -548,6 +556,7 @@ export class SbomCollector {
       return { raw: trimmed, lower, isPrefixWildcard: false, exact: lower };
     };
     const queries: ParsedQuery[] = purls.map(parseQuery).filter((q): q is ParsedQuery => !!q);
+    console.debug(queries);
     const results = new Map<string, { purl: string; reason: string }[]>();
     if (!queries.length) return results;
     const applyQueries = (candidatePurls: string[], queries: ParsedQuery[], found: Map<string, string>, branchTag?: string, fallbackVersion?: string) => {
@@ -586,7 +595,10 @@ export class SbomCollector {
       }
     };
 
+    console.debug(this.sboms);
+
     for (const repoSbom of this.sboms) {
+      console.debug(repoSbom);
       if (repoSbom.error) continue;
       interface ExtRef { referenceType: string; referenceLocator: string }
       const found = new Map<string, string>(); // purl -> query
@@ -600,6 +612,7 @@ export class SbomCollector {
       // Include dependency review diff additions/updates (head packages only)
       if (repoSbom.branchDiffs) {
         const diffs = repoSbom.branchDiffs.values();
+        console.debug(diffs);
         for (const diff of diffs) {
           for (const change of diff.changes) {
             if (change.changeType !== "added" && change.changeType !== "updated") continue;
