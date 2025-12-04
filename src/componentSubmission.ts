@@ -1,5 +1,5 @@
 import chalk from 'chalk';
-import { spawn, execFile } from 'child_process';
+import { execFile } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
