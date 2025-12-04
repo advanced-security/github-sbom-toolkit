@@ -76,14 +76,12 @@ export async function submitSnapshotIfPossible(opts: SubmitOpts): Promise<boolea
             if (!opts.quiet) console.error(chalk.red(`Failed to determine SHA for ${opts.owner}/${opts.repo} on branch ${opts.branch}`));
             return false;
         }
-        await run(opts.octokit, tmp, opts.owner, opts.repo, sha, opts.branch, opts.componentDetectionBinPath);
+        return await run(opts.octokit, tmp, opts.owner, opts.repo, sha, opts.branch, opts.componentDetectionBinPath);
 
     } catch (e) {
         if (!opts.quiet) console.error(chalk.red(`Component Detection failed: ${(e as Error).message}`));
         return false;
     }
-
-    return true;
 }
 
 function buildSparsePatterns(langs: string[]): string[] {
@@ -142,7 +140,7 @@ async function execGit(args: string[], opts: { cwd: string, quiet?: boolean }): 
     });
 }
 
-export async function run(octokit: Octokit, tmpDir: string, owner: string, repo: string, sha: string, ref: string, componentDetectionBinPath?: string) {
+export async function run(octokit: Octokit, tmpDir: string, owner: string, repo: string, sha: string, ref: string, componentDetectionBinPath?: string): Promise<boolean> {
 
     let manifests = await ComponentDetection.scanAndGetManifests(
         tmpDir,
@@ -176,7 +174,7 @@ export async function run(octokit: Octokit, tmpDir: string, owner: string, repo:
         snapshot.addManifest(manifest);
     });
 
-    submitSnapshot(octokit, snapshot, { owner, repo });
+    return await submitSnapshot(octokit, snapshot, { owner, repo });
 }
 
 /**
@@ -184,12 +182,13 @@ export async function run(octokit: Octokit, tmpDir: string, owner: string, repo:
  *
  * @param {Snapshot} snapshot
  * @param {Repo} repo
+ * @returns {Promise<boolean>} true if submission was successful, false otherwise
  */
 export async function submitSnapshot(
     octokit: Octokit,
     snapshot: Snapshot,
     repo: { owner: string; repo: string }
-) {
+): Promise<boolean> {
     console.debug('Submitting snapshot...')
     console.debug(snapshot.prettyJSON())
 
@@ -211,10 +210,12 @@ export async function submitSnapshot(
                 `Snapshot successfully created at ${response.data.created_at.toString()}` +
                 ` with id ${response.data.id}`
             )
+            return true
         } else {
             console.error(
                 `Snapshot creation failed with result: "${result}: ${response.data.message}"`
             )
+            return false
         }
     } catch (error) {
         if (error instanceof RequestError) {
@@ -231,6 +232,6 @@ export async function submitSnapshot(
             console.error(error.message)
             if (error.stack) console.error(error.stack)
         }
-        throw new Error(`Failed to submit snapshot: ${error}`)
+        return false
     }
 }
