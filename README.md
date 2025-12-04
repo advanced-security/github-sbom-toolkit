@@ -16,6 +16,7 @@ Supports human-readable, JSON, CSV and SARIF output. SARIF alerts can be uploade
   - Optional progress bar while fetching SBOMs
   - Option to suppress secondary rate limit warnings, and full quiet mode to suppress informative messages
   - Adaptive backoff: each secondary rate limit hit increases the SBOM fetch delay by 10% to reduce future throttling
+- Optional branch scanning†: fetch SBOM diffs with Dependency Review for non-default branches and submit missing dependency snapshots if needed with Component Detection + Dependency Submission
 - Offline caching of SBOMs and security advisories with incremental updates
 - Matching:
   - Version-aware matching of SBOM packages against malware advisories
@@ -27,9 +28,11 @@ Supports human-readable, JSON, CSV and SARIF output. SARIF alerts can be uploade
 - Output:
   - Human-readable console output
   - JSON or CSV output (to stdout or file) with both search and malware matches
-  - Optional SARIF 2.1.0 output per repository for malware matches with optional Code Scanning upload
+  - Optional SARIF 2.1.0 output per repository for malware matches
+    - includes Code Scanning upload†
 - Works with GitHub.com, GitHub Enterprise Server, GitHub Enterprise Managed Users and GitHub Enterprise Cloud with Data Residency (custom base URL)
-- Optional branch scanning: fetch SBOMs for non-default branches (limited) and compute Dependency Review diffs vs the default (or chosen base) branch
+
+† GitHub Advanced Security or GitHub Code Security required for this feature
 
 ## Usage
 
@@ -83,7 +86,7 @@ If a branch SBOM or diff retrieval fails, the error is recorded but does not sto
 
 #### Handling Missing Dependency Review Snapshots
 
-If the Dependency Review API returns a 404 for a branch diff (commonly due to a missing dependency snapshot on either the base or head commit), the toolkit can optionally attempt to generate and submit a snapshot using the Component Detection + Dependency Submission Action.
+If the Dependency Review API returns a 404 for a branch diff (commonly due to a missing dependency snapshot on either the base or head commit), the toolkit can optionally attempt to generate and submit a snapshot using Component Detection and Dependency Submission. This is vendored-in and forked from the public [Component Detection Dependency Submission Action](https://github.com/your-org/component-detection-dependency-submission-action).
 
 Enable automatic submission + retry with:
 
@@ -91,23 +94,7 @@ Enable automatic submission + retry with:
 --submit-on-missing-snapshot
 ```
 
-This requires the action repository to be present as a git submodule (or copied) at the path:
-
-```bash
-component-detection-dependency-submission-action/
-```
-
-After cloning, initialize submodules:
-
-```bash
-git submodule update --init --recursive
-```
-
-Build the action (if not already built) so its `dist/entrypoint.js` exists. The toolkit will then:
-
-1. Detect 404 from diff endpoint.
-2. Invoke the action locally to produce a snapshot for the target branch.
-3. Wait briefly then retry the dependency review diff once.
+The tool will attempt to download the latest Component Detection release from GitHub Releases into the current directory, to run it, unless you provide a local binary with `--component-detection-bin`.
 
 If submission fails, the original 404 reason is retained and collection proceeds.
 
@@ -125,15 +112,16 @@ npm run start -- \
   --component-detection-bin /usr/local/bin/component-detection
 ```
 
-GitHub Enterprise Server example:
+On MacOS, you may find that system protection prevents running a downloaded binary. You can [check out the .NET code](https://github.com/microsoft/component-detection/) and run it via a wrapper script such as:
 
 ```bash
-npm run start -- \
-  --sync-sboms --org my-org --sbom-cache sboms \
-  --base-url https://ghe.example.com/api/v3 \
-  --branch-scan --submit-on-missing-snapshot \
-  --submit-languages Python \
-  --component-detection-bin /opt/tools/component-detection
+#!/bin/bash
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+cd "$SCRIPT_DIR" || exit 1
+
+dotnet run --project "./src/Microsoft.ComponentDetection/Microsoft.ComponentDetection.csproj" "$@"
 ```
 
 Notes:
@@ -213,7 +201,6 @@ Malware-only advisory sync (no SBOM cache required):
 
 ```bash
 npm run start -- --sync-malware --malware-cache malware-cache --token $GITHUB_TOKEN
-```
 ```
 
 Write malware matches (and optionally search results later) to a JSON file using `--output-file`:
