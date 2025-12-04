@@ -2,6 +2,8 @@
 
 ## [2025-12-04] – 0.2.0 - Branch scanning and dependency submission
 
+Added:
+
 - Branch scanning:
   - Fetch SBOM diffs for non‑default branches via Dependency Review API.
   - Added `--branch-scan`, `--branch-limit`, and `--diff-base` CLI flags.
@@ -20,6 +22,10 @@
   - Added examples for malware-only sync and branch scanning.
 - Advisory sync robustness:
   - GraphQL advisory sync now implements adaptive retries with exponential backoff and `Retry-After` support; respects `--quiet`.
+
+Fixed:
+
+- Added `--ghes` flag to ensure proper API URL construction for GitHub Enterprise Server instances.
 
 ## [2025-10-06] - 0.1.0 - Initial public release
 
