@@ -250,7 +250,7 @@ export default class ComponentDetection {
     }
 
     try {
-      var packageUrl = `${packageUrlJson.Scheme}:${packageUrlJson.Type}/`;
+      const packageUrl = `${packageUrlJson.Scheme}:${packageUrlJson.Type}/`;
       if (packageUrlJson.Namespace) {
         packageUrl += `${packageUrlJson.Namespace.replaceAll("@", "%40")}/`;
       }
