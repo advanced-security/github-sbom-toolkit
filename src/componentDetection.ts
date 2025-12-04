@@ -331,11 +331,25 @@ export default class ComponentDetection {
   ): DependencyGraphs {
     // Resolve the base directory from filePathInput (relative to cwd if not absolute)
     const baseDir = path.resolve(process.cwd(), filePathInput);
-    const normalized: DependencyGraphs = {};
+    // Use a null-prototype object to avoid prototype pollution
+    const normalized: DependencyGraphs = Object.create(null);
     for (const absPath in dependencyGraphs) {
+      // Only process own properties
+      if (!Object.prototype.hasOwnProperty.call(dependencyGraphs, absPath)) continue;
       // Make the path relative to the baseDir
       let relPath = path.relative(baseDir, absPath).replace(/\\/g, '/');
-      normalized[relPath] = dependencyGraphs[absPath];
+      // Guard against special keys that could lead to prototype injection
+      if (relPath === '__proto__' || relPath === 'constructor' || relPath === 'prototype') {
+        console.warn(`Skipping unsafe manifest key: ${relPath}`);
+        continue;
+      }
+      // Define property safely
+      Object.defineProperty(normalized, relPath, {
+        value: dependencyGraphs[absPath],
+        enumerable: true,
+        configurable: false,
+        writable: false,
+      });
     }
     return normalized;
   }
