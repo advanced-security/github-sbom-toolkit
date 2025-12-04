@@ -14,7 +14,8 @@ export interface CollectorOptions {
   enterprise?: string; // Enterprise slug to enumerate orgs
   org?: string; // Single org alternative
   repo?: string; // Single repo alternative
-  baseUrl?: string; // For GHES
+  baseUrl?: string; // For GHES, EMU and Data Residency
+  ghes?: boolean; // Is this a GHES instance?
   concurrency?: number; // parallel repo SBOM fetches
   includePrivate?: boolean;
   delayMsBetweenRepos?: number;
@@ -53,6 +54,7 @@ export class SbomCollector {
     this.opts = {
       token: o.token,
       enterprise: o.enterprise,
+      ghes: o.ghes ?? false,
       org: o.org,
       repo: o.repo,
       baseUrl: o.baseUrl,
@@ -149,7 +151,7 @@ export class SbomCollector {
       process.stderr.write(chalk.blue(`Getting list of organizations for enterprise ${this.opts.enterprise}`) + "\n");
     }
 
-    const orgs = this.opts.org ? [this.opts.org] : this.opts.enterprise ? await this.listEnterpriseOrgs(this.opts.enterprise!) : [this.opts.repo.split("/")[0]];
+    const orgs = this.opts.org ? [this.opts.org] : this.opts.enterprise ? await this.listEnterpriseOrgs(this.opts.enterprise, this.opts.ghes) : [this.opts.repo.split("/")[0]];
     this.summary.orgs = orgs;
 
     // Pre-list all repos if showing progress bar so we know the total upfront
@@ -368,7 +370,7 @@ export class SbomCollector {
     return false;
   }
 
-  private async listEnterpriseOrgs(enterprise: string): Promise<string[]> {
+  private async listEnterpriseOrgs(enterprise: string, ghes: boolean): Promise<string[]> {
     if (!this.octokit) throw new Error("No Octokit instance");
     interface Org { login: string }
     try {
@@ -377,7 +379,7 @@ export class SbomCollector {
       let page = 1;
       let done = false;
       while (!done) {
-        const resp = await this.octokit.request("GET /enterprises/{enterprise}/orgs", { enterprise, per_page, page });
+        const resp = await this.octokit.request(ghes ? "GET /orgs" : "GET /enterprises/{enterprise}/orgs", { enterprise, per_page, page });
         const items = resp.data as unknown as Org[];
         for (const o of items) orgs.push(o.login);
         if (items.length < per_page) done = true; else page++;

@@ -18,6 +18,7 @@ async function main() {
     .option("org", { type: "string", describe: "Single organization login" })
     .option("repo", { type: "string", describe: "Single repository name" })
     .option("base-url", { type: "string", describe: "GitHub Enterprise Server base URL, e.g. https://github.mycompany.com/api/v3" })
+    .option("ghes", { type: "boolean", default: false, describe: "Indicates that the provided base URL is for GitHub Enterprise Server" })
     .option("concurrency", { type: "number", default: 5 })
     .option("sbom-delay", { type: "number", default: 3000, describe: "Delay (ms) between SBOM fetch requests" })
     .option("light-delay", { type: "number", default: 100, describe: "Delay (ms) between lightweight metadata requests (org/repo listing, commit head checks)" })
@@ -122,6 +123,7 @@ async function main() {
     org: argv.org as string | undefined,
     repo: argv.repo as string | undefined,
     baseUrl: argv["base-url"] as string | undefined,
+    ghes: argv.ghes as boolean | undefined,
     concurrency: argv.concurrency as number,
     delayMsBetweenRepos: argv["sbom-delay"] as number,
     lightDelayMs: argv["light-delay"] as number,
