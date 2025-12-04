@@ -62,7 +62,7 @@ export default class ComponentDetection {
 
   // Run the component-detection CLI on the path specified
   public static runComponentDetection(path: string): Promise<boolean> {
-    console.info(`Running component-detection on ${path}`);
+    console.debug(`Running component-detection on ${path}`);
 
     console.debug(`Writing to output file: ${this.outputPath}`);
 
@@ -103,7 +103,7 @@ export default class ComponentDetection {
   }
 
   public static async getManifestsFromResults(file: string, path: string): Promise<Manifest[] | undefined> {
-    console.info(`Reading results from ${file}`);
+    console.debug(`Reading results from ${file}`);
     const results = await fs.readFileSync(file, 'utf8');
     var json: any = JSON.parse(results);
 

@@ -305,7 +305,7 @@ export class SbomCollector {
               // Optionally perform dependency submission up front for the branch
               if (this.opts.forceSubmission) {
                 try {
-                  console.log(chalk.blue(`Force-submission enabled: submitting component snapshot for ${fullName} branch ${b.name}...`));
+                  console.debug(chalk.blue(`Force-submission enabled: submitting component snapshot for ${fullName} branch ${b.name}...`));
                   await submitSnapshotIfPossible({ octokit: this.octokit, owner: org, repo: repo.name, branch: b.name, languages: this.opts.submitLanguages, quiet: this.opts.quiet, componentDetectionBinPath: this.opts.componentDetectionBinPath });
                   // brief delay to allow snapshot ingestion
                   await new Promise(r => setTimeout(r, 1500));

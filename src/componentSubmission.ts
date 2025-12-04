@@ -1,5 +1,5 @@
 import chalk from 'chalk';
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, execFile } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -8,11 +8,12 @@ import ComponentDetection from './componentDetection.js';
 import {
     Job,
     Snapshot,
-    submitSnapshot
 } from '@github/dependency-submission-toolkit';
+import { Octokit } from 'octokit';
+import { RequestError } from '@octokit/request-error'
 
 export interface SubmitOpts {
-    octokit?: any; // Octokit instance, optional
+    octokit: Octokit;
     owner: string;
     repo: string;
     branch: string;
@@ -51,8 +52,9 @@ export async function sparseCheckout(owner: string, repo: string, branch: string
     await execGit(['fetch', '--depth=1', 'origin', branch], { cwd });
     await execGit(['checkout', 'FETCH_HEAD'], { cwd });
 
-    const process = await execGit(['rev-parse', 'HEAD'], { cwd: destDir });
-    const sha = process?.stdout?.toString().trim();
+    const { stdout: shaOut } = await execGit(['rev-parse', 'HEAD'], { cwd: destDir });
+    const sha = shaOut.trim();
+    console.debug(`Checked out ${owner}/${repo}@${branch} to ${destDir} at commit ${sha}`);
     return sha;
 }
 
@@ -74,7 +76,7 @@ export async function submitSnapshotIfPossible(opts: SubmitOpts): Promise<boolea
             if (!opts.quiet) console.error(chalk.red(`Failed to determine SHA for ${opts.owner}/${opts.repo} on branch ${opts.branch}`));
             return false;
         }
-        await run(tmp, opts.owner, opts.repo, sha, opts.branch, opts.componentDetectionBinPath);
+        await run(opts.octokit, tmp, opts.owner, opts.repo, sha, opts.branch, opts.componentDetectionBinPath);
 
     } catch (e) {
         if (!opts.quiet) console.error(chalk.red(`Component Detection failed: ${(e as Error).message}`));
@@ -127,15 +129,20 @@ function buildSparsePatterns(langs: string[]): string[] {
     return Array.from(set);
 }
 
-async function execGit(args: string[], opts: { cwd: string, quiet?: boolean }): Promise<ChildProcess> {
-    return await new Promise<ChildProcess>((resolve, reject) => {
-        const child = spawn('git', args, { cwd: opts.cwd, stdio: 'pipe' });
-        child.on('error', reject);
-        child.on('exit', code => code === 0 ? resolve(child) : reject(new Error(`git ${args.join(' ')} exit ${code}`)));
+async function execGit(args: string[], opts: { cwd: string, quiet?: boolean }): Promise<{ stdout: string; stderr: string }> {
+    return await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+        execFile('git', args, { cwd: opts.cwd, encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+            if (error) {
+                const msg = stderr?.trim() || error.message;
+                reject(new Error(`git ${args.join(' ')} failed: ${msg}`));
+            } else {
+                resolve({ stdout, stderr: stderr ?? '' });
+            }
+        });
     });
 }
 
-export async function run(tmpDir: string, owner: string, repo: string, sha: string, ref: string, componentDetectionBinPath?: string) {
+export async function run(octokit: Octokit, tmpDir: string, owner: string, repo: string, sha: string, ref: string, componentDetectionBinPath?: string) {
 
     let manifests = await ComponentDetection.scanAndGetManifests(
         tmpDir,
@@ -160,12 +167,70 @@ export async function run(tmpDir: string, owner: string, repo: string, sha: stri
     };
 
     let snapshot = new Snapshot(detector, undefined, job);
+    snapshot.ref = `refs/heads/${ref}`;
+    snapshot.sha = sha;
+
+    console.debug(`Submitting snapshot for ${owner}/${repo} at ${snapshot.ref} (${snapshot.sha}) with ${manifests?.length || 0} manifests`);
 
     manifests?.forEach((manifest) => {
         snapshot.addManifest(manifest);
     });
 
+    submitSnapshot(octokit, snapshot, { owner, repo });
+}
+
+/**
+ * submitSnapshot submits a snapshot to the Dependency Submission API - vendored in from @github/dependency-submission-toolkit, to make it work at the CLI, vs in Actions.
+ *
+ * @param {Snapshot} snapshot
+ * @param {Repo} repo
+ */
+export async function submitSnapshot(
+    octokit: Octokit,
+    snapshot: Snapshot,
+    repo: { owner: string; repo: string }
+) {
+    console.debug('Submitting snapshot...')
     console.debug(snapshot.prettyJSON())
 
-    //submitSnapshot(snapshot);
+    try {
+        const response = await octokit.request(
+            'POST /repos/{owner}/{repo}/dependency-graph/snapshots',
+            {
+                headers: {
+                    accept: 'application/vnd.github.foo-bar-preview+json'
+                },
+                owner: repo.owner,
+                repo: repo.repo,
+                ...snapshot
+            }
+        )
+        const result = response.data.result
+        if (result === 'SUCCESS' || result === 'ACCEPTED') {
+            console.debug(
+                `Snapshot successfully created at ${response.data.created_at.toString()}` +
+                ` with id ${response.data.id}`
+            )
+        } else {
+            console.error(
+                `Snapshot creation failed with result: "${result}: ${response.data.message}"`
+            )
+        }
+    } catch (error) {
+        if (error instanceof RequestError) {
+            console.error(
+                `HTTP Status ${error.status} for request ${error.request.method} ${error.request.url}`
+            )
+            if (error.response) {
+                console.error(
+                    `Response body:\n${JSON.stringify(error.response.data, undefined, 2)}`
+                )
+            }
+        }
+        if (error instanceof Error) {
+            console.error(error.message)
+            if (error.stack) console.error(error.stack)
+        }
+        throw new Error(`Failed to submit snapshot: ${error}`)
+    }
 }
