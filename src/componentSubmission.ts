@@ -64,7 +64,7 @@ export async function submitSnapshotIfPossible(opts: SubmitOpts): Promise<boolea
     }
 
     try {
-        const intersect = await getLanguageIntersection(opts.octokit, opts.owner, opts.repo, opts.languages);
+        const intersect = await getLanguageIntersection(opts.octokit, opts.owner, opts.repo, opts.languages, opts.quiet);
         
         // Early return if no languages match to avoid unnecessary git operations
         if (intersect.length === 0) {
