@@ -24,8 +24,8 @@ async function main() {
     { name: 'lodash', version: '4.17.21', purl: 'pkg:npm/lodash@4.17.21' }
   ];
   const diffChanges = [
-    { changeType: 'added', name: 'lodash', ecosystem: 'npm', purl: 'pkg:npm/lodash@4.17.21', newVersion: '4.17.21' },
-    { changeType: 'updated', name: 'react', ecosystem: 'npm', purl: 'pkg:npm/react@18.3.0-beta', previousVersion: '18.2.0', newVersion: '18.3.0-beta' }
+    { changeType: 'added', name: 'lodash', ecosystem: 'npm', purl: 'pkg:npm/lodash@4.17.21', version: '4.17.21' },
+    { changeType: 'updated', name: 'react', ecosystem: 'npm', purl: 'pkg:npm/react@18.3.0-beta', version: '18.2.0', newVersion: '18.3.0-beta' }
   ];
 
   const synthetic: RepositorySbom = {

@@ -627,7 +627,7 @@ export class SbomCollector {
             const candidatePurls: string[] = [];
             if ((change as { purl?: string }).purl) candidatePurls.push((change as { purl?: string }).purl as string);
             if (change.packageURL) candidatePurls.push(change.packageURL);
-            applyQueries(candidatePurls, queries, found, diff.head, (change as any).newVersion);
+            applyQueries(candidatePurls, queries, found, diff.head, (change as any).version);
           }
         }
       }
