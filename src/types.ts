@@ -123,7 +123,7 @@ export interface DependencyReviewPackageChange {
 }
 
 export interface BranchDependencyDiff {
-  latestCommitDate: any;
+  latestCommitDate: string;
   base: string; // base branch
   head: string; // head branch
   retrievedAt: string;
