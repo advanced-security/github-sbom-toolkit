@@ -528,7 +528,7 @@ export class SbomCollector {
           }
         }
       }
-      return { latestCommitDate: new Date().toISOString(), base, head, retrievedAt: new Date().toISOString(), changes: [], error: reason };
+      return { latestCommitDate: undefined, base, head, retrievedAt: new Date().toISOString(), changes: [], error: reason };
     }
   }
 
