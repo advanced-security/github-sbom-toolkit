@@ -180,8 +180,9 @@ export async function run(octokit: Octokit, tmpDir: string, owner: string, repo:
 /**
  * submitSnapshot submits a snapshot to the Dependency Submission API - vendored in from @github/dependency-submission-toolkit, to make it work at the CLI, vs in Actions.
  *
- * @param {Snapshot} snapshot
- * @param {Repo} repo
+ * @param {Octokit} octokit - The Octokit instance for GitHub API requests
+ * @param {Snapshot} snapshot - The dependency snapshot to submit
+ * @param {Repo} repo - The repository owner and name
  * @returns {Promise<boolean>} true if submission was successful, false otherwise
  */
 export async function submitSnapshot(
