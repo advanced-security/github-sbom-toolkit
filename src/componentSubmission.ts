@@ -63,10 +63,11 @@ export async function submitSnapshotIfPossible(opts: SubmitOpts): Promise<boolea
         throw new Error('Octokit instance is required in opts.octokit');
     }
 
+    const intersect = await getLanguageIntersection(opts.octokit, opts.owner, opts.repo, opts.languages);
+    // Create temp dir and sparse checkout only manifest files according to selected languages
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cd-submission-'));
+    
     try {
-        const intersect = await getLanguageIntersection(opts.octokit, opts.owner, opts.repo, opts.languages);
-        // Create temp dir and sparse checkout only manifest files according to selected languages
-        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cd-submission-'));
         console.debug(chalk.green(`Sparse checkout into ${tmp} for languages: ${intersect.join(', ')}`));
 
         const sha = await sparseCheckout(opts.owner, opts.repo, opts.branch, tmp, intersect, opts.baseUrl);
@@ -81,6 +82,14 @@ export async function submitSnapshotIfPossible(opts: SubmitOpts): Promise<boolea
     } catch (e) {
         if (!opts.quiet) console.error(chalk.red(`Component Detection failed: ${(e as Error).message}`));
         return false;
+    } finally {
+        // Clean up the temporary directory
+        try {
+            fs.rmSync(tmp, { recursive: true, force: true });
+            console.debug(`Cleaned up temporary directory: ${tmp}`);
+        } catch (cleanupError) {
+            console.warn(`Failed to clean up temporary directory ${tmp}: ${(cleanupError as Error).message}`);
+        }
     }
 
     return true;
