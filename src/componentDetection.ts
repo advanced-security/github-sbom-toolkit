@@ -105,7 +105,7 @@ export default class ComponentDetection {
   public static async getManifestsFromResults(file: string, path: string): Promise<Manifest[] | undefined> {
     console.debug(`Reading results from ${file}`);
     const results = await fs.readFileSync(file, 'utf8');
-    var json: any = JSON.parse(results);
+    const json: any = JSON.parse(results);
 
     let dependencyGraphs: DependencyGraphs = this.normalizeDependencyGraphPaths(json.dependencyGraphs, path);
 
