@@ -19,10 +19,6 @@ async function main() {
     { name: 'chalk', version: '5.6.1', purl: 'pkg:npm/chalk@5.6.1' },
     { name: 'react', version: '18.2.0', purl: 'pkg:npm/react@18.2.0' }
   ];
-  const featurePackages = [
-    { name: 'react', version: '18.3.0-beta', purl: 'pkg:npm/react@18.3.0-beta' },
-    { name: 'lodash', version: '4.17.21', purl: 'pkg:npm/lodash@4.17.21' }
-  ];
   const diffChanges = [
     { changeType: 'added', name: 'lodash', ecosystem: 'npm', purl: 'pkg:npm/lodash@4.17.21', version: '4.17.21' },
     { changeType: 'updated', name: 'react', ecosystem: 'npm', purl: 'pkg:npm/react@18.3.0-beta', version: '18.2.0', newVersion: '18.3.0-beta' }

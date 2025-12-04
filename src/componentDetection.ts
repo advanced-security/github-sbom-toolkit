@@ -105,7 +105,7 @@ export default class ComponentDetection {
   public static async getManifestsFromResults(file: string, path: string): Promise<Manifest[] | undefined> {
     console.debug(`Reading results from ${file}`);
     const results = await fs.readFileSync(file, 'utf8');
-    var json: any = JSON.parse(results);
+    const json: any = JSON.parse(results);
 
     let dependencyGraphs: DependencyGraphs = this.normalizeDependencyGraphPaths(json.dependencyGraphs, path);
 
@@ -300,7 +300,7 @@ export default class ComponentDetection {
     try {
       const latestRelease = await octokit.request("GET /repos/{owner}/{repo}/releases/latest", { owner, repo });
 
-      var downloadURL: string = "";
+      let downloadURL: string = "";
       // TODO: do we need to handle different architectures here?
       // can we allow x64 on MacOS? We could allow an input parameter to override?
       const assetName = process.platform === "win32" ? "component-detection-win-x64.exe" : process.platform === "linux" ? "component-detection-linux-x64" : "component-detection-osx-arm64";

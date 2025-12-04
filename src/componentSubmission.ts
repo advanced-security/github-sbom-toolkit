@@ -83,7 +83,7 @@ export async function submitSnapshotIfPossible(opts: SubmitOpts): Promise<boolea
         return false;
     }
 
-    return false;
+    return true;
 }
 
 function buildSparsePatterns(langs: string[]): string[] {
