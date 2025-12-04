@@ -483,7 +483,7 @@ export class SbomCollector {
     return branches;
   }
 
-  private async fetchDependencyReviewDiff(org: string, repo: string, base: string, head: string): Promise<BranchDependencyDiff> {
+  private async fetchDependencyReviewDiff(org: string, repo: string, base: string, head: string, retried = false): Promise<BranchDependencyDiff> {
     if (!this.octokit) throw new Error("No Octokit instance");
     try {
       const basehead = `${base}...${head}`;
@@ -513,14 +513,14 @@ export class SbomCollector {
       if (status === 404) {
         reason = "Dependency review unavailable (missing snapshot or feature disabled)";
         // Optional retry path: submit snapshot then retry once
-        if (this.opts.submitOnMissingSnapshot) {
+        if (this.opts.submitOnMissingSnapshot && !retried) {
           console.log(chalk.blue(`Attempting to submit component snapshot for ${org}/${repo} branch ${head} before retrying dependency review diff...`));
           try {
             const ok = await submitSnapshotIfPossible({ octokit: this.octokit, owner: org, repo: repo, branch: head, languages: this.opts.submitLanguages, quiet: this.opts.quiet, componentDetectionBinPath: this.opts.componentDetectionBinPath });
             if (ok) {
               console.log(chalk.blue(`Snapshot submission attempted; waiting 3 seconds before retrying dependency review diff for ${org}/${repo} ${base}...${head}...`));
               await new Promise(r => setTimeout(r, 3000));
-              return await this.fetchDependencyReviewDiff(org, repo, base, head);
+              return await this.fetchDependencyReviewDiff(org, repo, base, head, true);
             }
           } catch (subErr) {
             console.error(chalk.red(`Snapshot submission failed for ${org}/${repo} branch ${head}: ${(subErr as Error).message}`));
