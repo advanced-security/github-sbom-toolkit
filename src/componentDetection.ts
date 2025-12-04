@@ -31,7 +31,7 @@ export default class ComponentDetection {
       return;
     }
 
-    return await this.getManifestsFromResults(this.outputPath);
+    return await this.getManifestsFromResults(this.outputPath, path);
   }
   // Get the latest release from the component-detection repo, download the tarball, and extract it
   public static async downloadLatestRelease() {
@@ -77,9 +77,9 @@ export default class ComponentDetection {
         });
 
         child.on('exit', (code) => {
-          console.info(`Component-detection process ${pid} exited with code ${code}`);
+          console.debug(`Component-detection process ${pid} exited with code ${code}`);
           if (code === 0) {
-            console.info(`Component-detection completed successfully.`);
+            console.debug(`Component-detection completed successfully.`);
             resolve(true);
           } else {
             console.error(`Component-detection failed with exit code ${code}.`);
@@ -102,11 +102,13 @@ export default class ComponentDetection {
     });
   }
 
-  public static async getManifestsFromResults(file: string): Promise<Manifest[] | undefined> {
+  public static async getManifestsFromResults(file: string, path: string): Promise<Manifest[] | undefined> {
     console.info(`Reading results from ${file}`);
     const results = await fs.readFileSync(file, 'utf8');
     var json: any = JSON.parse(results);
-    let dependencyGraphs: DependencyGraphs = this.normalizeDependencyGraphPaths(json.dependencyGraphs, '.');
+
+    let dependencyGraphs: DependencyGraphs = this.normalizeDependencyGraphPaths(json.dependencyGraphs, path);
+
     return this.processComponentsToManifests(json.componentsFound, dependencyGraphs);
   }
 
@@ -125,6 +127,9 @@ export default class ComponentDetection {
         }, null, 2)}`);
         return;
       }
+
+      console.debug(`Processing component: ${component.component.id}`);
+      console.debug(`Component details: ${JSON.stringify(component.component.packageUrl, null, 2)}`);
 
       const packageUrl = ComponentDetection.makePackageUrl(component.component.packageUrl);
 
@@ -164,7 +169,7 @@ export default class ComponentDetection {
         try {
           const referrerPackage = packageCache.lookupPackage(referrerUrl);
           if (referrerPackage === pkg) {
-            console.debug(`Skipping self-reference for package: ${pkg.id}`);
+            console.debug(`Found self-reference for package: ${pkg.id}`);
             return; // Skip self-references
           }
           if (referrerPackage) {
@@ -178,6 +183,9 @@ export default class ComponentDetection {
 
     // Create manifests
     const manifests: Array<Manifest> = [];
+
+    console.debug("Dependency Graphs:");
+    console.debug(JSON.stringify(dependencyGraphs, null, 2));
 
     // Check the locationsFoundAt for every package and add each as a manifest
     this.addPackagesToManifests(packages, manifests, dependencyGraphs);
