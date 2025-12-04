@@ -158,7 +158,7 @@ export default class ComponentDetection {
         }
 
         const referrerUrl = ComponentDetection.makePackageUrl(referrer.packageUrl);
-        referrer.packageUrlString = referrerUrl
+        referrer.packageUrlString = referrerUrl;
 
         // Skip if the generated packageUrl is empty
         if (!referrerUrl) {
