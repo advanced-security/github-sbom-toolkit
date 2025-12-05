@@ -48,6 +48,16 @@ export class SbomCollector {
     if (!options.loadFromDir && !options.enterprise && !options.org && !options.repo) {
       throw new Error("One of enterprise/org/repo or loadFromDir must be specified");
     }
+    // Validate repo format if provided
+    if (options.repo) {
+      if (typeof options.repo !== "string" || !options.repo.includes("/")) {
+        throw new Error('If specifying "repo", it must be in the format "org/repo".');
+      }
+      const [orgPart, repoPart] = options.repo.split("/");
+      if (!orgPart || !repoPart) {
+        throw new Error('If specifying "repo", it must be in the format "org/repo" with both parts non-empty.');
+      }
+    }
     // Spread user options first then apply defaults via nullish coalescing so that
     // passing undefined does not erase defaults
     const o = { ...options };
