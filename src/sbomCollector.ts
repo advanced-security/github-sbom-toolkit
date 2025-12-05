@@ -48,6 +48,16 @@ export class SbomCollector {
     if (!options.loadFromDir && !options.enterprise && !options.org && !options.repo) {
       throw new Error("One of enterprise/org/repo or loadFromDir must be specified");
     }
+    // Validate repo format if provided
+    if (options.repo) {
+      if (typeof options.repo !== "string" || !options.repo.includes("/")) {
+        throw new Error('If specifying "repo", it must be in the format "org/repo".');
+      }
+      const [orgPart, repoPart] = options.repo.split("/");
+      if (!orgPart || !repoPart) {
+        throw new Error('If specifying "repo", it must be in the format "org/repo" with both parts non-empty.');
+      }
+    }
     // Spread user options first then apply defaults via nullish coalescing so that
     // passing undefined does not erase defaults
     const o = { ...options };
@@ -300,9 +310,9 @@ export class SbomCollector {
                 continue;
               }
 
-              if (this.opts.lightDelayMs) await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
               const base = this.opts.branchDiffBase || sbom?.defaultBranch;
               if (!base) { console.error(chalk.red(`Cannot compute branch diff for ${fullName} branch ${b.name} because base branch is undefined.`)); continue; }
+
               if (this.opts.lightDelayMs) await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
               // Optionally perform dependency submission up front for the branch
               if (this.opts.forceSubmission) {
@@ -315,7 +325,7 @@ export class SbomCollector {
                   console.error(chalk.red(`Force submission failed for ${fullName} branch ${b.name}: ${(subErr as Error).message}`));
                 }
               }
-              const diff = await this.fetchDependencyReviewDiff(org, repo.name, base, b.name, latestCommit);
+              const diff = await this.fetchDependencyReviewDiff(org, repo.name, base, b.name, latestCommit, 1);
               branchDiffs.set(b.name, diff);
             }
             if (branchDiffs.size) sbom.branchDiffs = branchDiffs;
@@ -324,7 +334,9 @@ export class SbomCollector {
             this.decisions[fullName] = (this.decisions[fullName] || "") + ` (branch scan error: ${(e as Error).message})`;
             console.debug((e as Error).message);
           }
+
           if (sbom.error) this.summary.failedCount++; else this.summary.successCount++;
+
           // Write freshly fetched SBOM immediately if a cache directory is configured
           if (this.opts.loadFromDir && this.opts.syncSboms && this.opts.loadFromDir.length) {
             try { writeOne(sbom, { outDir: this.opts.loadFromDir }); } catch { /* ignore write errors */ }
@@ -483,7 +495,7 @@ export class SbomCollector {
     return branches;
   }
 
-  private async fetchDependencyReviewDiff(org: string, repo: string, base: string, head: string, latestCommit?: { sha?: string; commitDate?: string }): Promise<BranchDependencyDiff> {
+  private async fetchDependencyReviewDiff(org: string, repo: string, base: string, head: string, latestCommit?: { sha?: string; commitDate?: string, retries: number }): Promise<BranchDependencyDiff> {
     if (!this.octokit) throw new Error("No Octokit instance");
     try {
       const basehead = `${base}...${head}`;
@@ -520,7 +532,7 @@ export class SbomCollector {
             if (ok) {
               console.log(chalk.blue(`Snapshot submission attempted; waiting 3 seconds before retrying dependency review diff for ${org}/${repo} ${base}...${head}...`));
               await new Promise(r => setTimeout(r, 3000));
-              return await this.fetchDependencyReviewDiff(org, repo, base, head, latestCommit);
+              return await this.fetchDependencyReviewDiff(org, repo, base, head, latestCommit, retries--);
             }
           } catch (subErr) {
             console.error(chalk.red(`Snapshot submission failed for ${org}/${repo} branch ${head}: ${(subErr as Error).message}`));
@@ -528,7 +540,7 @@ export class SbomCollector {
           }
         }
       }
-      return { latestCommitDate: latestCommit?.commitDate || new Date().toISOString(), base, head, retrievedAt: new Date().toISOString(), changes: [], error: reason };
+      return { latestCommitDate: undefined, base, head, retrievedAt: new Date().toISOString(), changes: [], error: reason };
     }
   }
 
@@ -627,7 +639,7 @@ export class SbomCollector {
             const candidatePurls: string[] = [];
             if ((change as { purl?: string }).purl) candidatePurls.push((change as { purl?: string }).purl as string);
             if (change.packageURL) candidatePurls.push(change.packageURL);
-            applyQueries(candidatePurls, queries, found, diff.head, (change as any).version);
+            applyQueries(candidatePurls, queries, found, diff.head, change.version);
           }
         }
       }

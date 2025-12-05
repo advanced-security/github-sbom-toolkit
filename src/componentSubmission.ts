@@ -25,7 +25,7 @@ export interface SubmitOpts {
     componentDetectionBinPath?: string; // optional path to component-detection executable
 }
 
-export async function getLanguageIntersection(octokit: any, owner: string, repo: string, languages: string[] | undefined, quiet: boolean = false): Promise<string[]> {
+export async function getLanguageIntersection(octokit: Octokit, owner: string, repo: string, languages: string[] | undefined, quiet: boolean = false): Promise<string[]> {
     const langResp = await octokit.request('GET /repos/{owner}/{repo}/languages', { owner, repo });
     const repoLangs = Object.keys(langResp.data || {});
     const wanted = languages;
@@ -63,10 +63,15 @@ export async function submitSnapshotIfPossible(opts: SubmitOpts): Promise<boolea
         throw new Error('Octokit instance is required in opts.octokit');
     }
 
+    const tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'cd-submission-'));
+
     try {
         const intersect = await getLanguageIntersection(opts.octokit, opts.owner, opts.repo, opts.languages);
         // Create temp dir and sparse checkout only manifest files according to selected languages
-        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cd-submission-'));
+        if (!intersect.length) {
+            // No matching languages, skip submission
+            return false;
+        }
         console.debug(chalk.green(`Sparse checkout into ${tmp} for languages: ${intersect.join(', ')}`));
 
         const sha = await sparseCheckout(opts.owner, opts.repo, opts.branch, tmp, intersect, opts.baseUrl);
@@ -76,14 +81,15 @@ export async function submitSnapshotIfPossible(opts: SubmitOpts): Promise<boolea
             if (!opts.quiet) console.error(chalk.red(`Failed to determine SHA for ${opts.owner}/${opts.repo} on branch ${opts.branch}`));
             return false;
         }
-        await run(opts.octokit, tmp, opts.owner, opts.repo, sha, opts.branch, opts.componentDetectionBinPath);
+        return await run(opts.octokit, tmp, opts.owner, opts.repo, sha, opts.branch, opts.componentDetectionBinPath);
 
     } catch (e) {
         if (!opts.quiet) console.error(chalk.red(`Component Detection failed: ${(e as Error).message}`));
         return false;
+    } finally {
+        // Clean up temp dir
+        await fs.promises.rm(tmp, { recursive: true, force: true });
     }
-
-    return true;
 }
 
 function buildSparsePatterns(langs: string[]): string[] {
@@ -124,8 +130,10 @@ function buildSparsePatterns(langs: string[]): string[] {
             add('**/*.sln');
         }
     }
-    // Always include root lockfiles just in case
-    add('package.json'); add('package-lock.json'); add('yarn.lock'); add('pnpm-lock.yaml');
+    // Include root lockfiles only if JavaScript/TypeScript is among selected languages
+    if (langs.some(l => ['javascript', 'typescript', 'node', 'js', 'ts'].includes(l.toLowerCase()))) {
+        add('package.json'); add('package-lock.json'); add('yarn.lock'); add('pnpm-lock.yaml');
+    }
     return Array.from(set);
 }
 
@@ -142,12 +150,11 @@ async function execGit(args: string[], opts: { cwd: string, quiet?: boolean }): 
     });
 }
 
-export async function run(octokit: Octokit, tmpDir: string, owner: string, repo: string, sha: string, ref: string, componentDetectionBinPath?: string) {
+export async function run(octokit: Octokit, tmpDir: string, owner: string, repo: string, sha: string, ref: string, componentDetectionBinPath?: string): Promise<boolean> {
 
-    let manifests = await ComponentDetection.scanAndGetManifests(
-        tmpDir,
-        componentDetectionBinPath
-    );
+    const componentDetection = new ComponentDetection(octokit, '', componentDetectionBinPath);
+
+    let manifests = await componentDetection.scanAndGetManifests(tmpDir);
 
     // Get detector configuration inputs
     const detectorName = "Component Detection in GitHub SBOM Toolkit: advanced-security/github-sbom-toolkit";
@@ -161,9 +168,11 @@ export async function run(octokit: Octokit, tmpDir: string, owner: string, repo:
         url: detectorUrl,
     };
 
+    const date = new Date().toISOString();
+
     const job: Job = {
         correlator: 'github-sbom-toolkit',
-        id: Math.floor(Math.random() * Number.MAX_SAFE_INTEGER).toString()
+        id: `${owner}-${repo}-${ref}-${date}-${Math.floor(Math.random() * Number.MAX_SAFE_INTEGER).toString()}`
     };
 
     let snapshot = new Snapshot(detector, undefined, job);
@@ -176,20 +185,22 @@ export async function run(octokit: Octokit, tmpDir: string, owner: string, repo:
         snapshot.addManifest(manifest);
     });
 
-    submitSnapshot(octokit, snapshot, { owner, repo });
+    return await submitSnapshot(octokit, snapshot, { owner, repo });
 }
 
 /**
  * submitSnapshot submits a snapshot to the Dependency Submission API - vendored in from @github/dependency-submission-toolkit, to make it work at the CLI, vs in Actions.
  *
- * @param {Snapshot} snapshot
- * @param {Repo} repo
+ * @param {Octokit} octokit - The Octokit instance for GitHub API requests
+ * @param {Snapshot} snapshot - The dependency snapshot to submit
+ * @param {Repo} repo - The repository owner and name
+ * @returns {Promise<boolean>} true if submission was successful, false otherwise
  */
 export async function submitSnapshot(
     octokit: Octokit,
     snapshot: Snapshot,
     repo: { owner: string; repo: string }
-) {
+): Promise<boolean> {
     console.debug('Submitting snapshot...')
     console.debug(snapshot.prettyJSON())
 
@@ -198,7 +209,7 @@ export async function submitSnapshot(
             'POST /repos/{owner}/{repo}/dependency-graph/snapshots',
             {
                 headers: {
-                    accept: 'application/vnd.github.foo-bar-preview+json'
+                    accept: 'application/vnd.github+json'
                 },
                 owner: repo.owner,
                 repo: repo.repo,
@@ -211,10 +222,12 @@ export async function submitSnapshot(
                 `Snapshot successfully created at ${response.data.created_at.toString()}` +
                 ` with id ${response.data.id}`
             )
+            return true
         } else {
             console.error(
                 `Snapshot creation failed with result: "${result}: ${response.data.message}"`
             )
+            return false
         }
     } catch (error) {
         if (error instanceof RequestError) {
@@ -231,6 +244,6 @@ export async function submitSnapshot(
             console.error(error.message)
             if (error.stack) console.error(error.stack)
         }
-        throw new Error(`Failed to submit snapshot: ${error}`)
+        return false
     }
 }

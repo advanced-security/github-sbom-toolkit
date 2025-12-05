@@ -12,8 +12,7 @@
     "start": "node dist/cli.js",
     "dev": "tsx src/cli.ts",
     "lint": "eslint . --ext .ts --max-warnings=0",
-    "test": "node dist/test-fixture-match.js",
-    "test:branch-search": "node dist/test-branch-search.js"
+    "test": "node dist/test-fixture-match.js && node dist/test-branch-search.js"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -28,7 +27,7 @@
     "@octokit/plugin-throttling": "^11.0.3",
     "chalk": "^5.6.2",
     "cross-fetch": "^4.1.0",
-    "inquirer": "^12.11.0",
+    "inquirer": "^12.11.1",
     "octokit": "^5.0.5",
     "p-limit": "^7.2.0",
     "packageurl-js": "^2.0.1",

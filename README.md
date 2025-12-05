@@ -68,7 +68,6 @@ Flags:
 ```bash
 --branch-scan              # Fetch SBOMs for non-default branches
 --branch-limit <n>          # Max number of non-default branches per repo (default 10)
---dependency-review         # Fetch dependency review diffs (enabled by default)
 --diff-base <branch>        # Override base branch for diffs (default: repository default)
 ```
 
@@ -86,7 +85,7 @@ If a branch SBOM or diff retrieval fails, the error is recorded but does not sto
 
 #### Handling Missing Dependency Review Snapshots
 
-If the Dependency Review API returns a 404 for a branch diff (commonly due to a missing dependency snapshot on either the base or head commit), the toolkit can optionally attempt to generate and submit a snapshot using Component Detection and Dependency Submission. This is vendored-in and forked from the public [Component Detection Dependency Submission Action](https://github.com/your-org/component-detection-dependency-submission-action).
+If the Dependency Review API returns a 404 for a branch diff (commonly due to a missing dependency snapshot on either the base or head commit), the toolkit can optionally attempt to generate and submit a snapshot using Component Detection and Dependency Submission. This is vendored-in and forked from the public [Component Detection Dependency Submission Action](https://github.com/advanced-security/component-detection-dependency-submission-action).
 
 Enable automatic submission + retry with:
 
@@ -172,7 +171,7 @@ npm run start -- --sbom-cache sboms --purl-file queries.txt
 npm run start -- --sync-sboms --org my-org --sbom-cache sboms
 ```
 
-1. Later offline search (no API calls; uses previously written per‑repo JSON):
+2. Later offline search (no API calls; uses previously written per‑repo JSON):
 
 ```bash
 npm run start -- --sbom-cache sboms --purl pkg:npm/react@18.2.0
@@ -442,7 +441,7 @@ npm install
 npm run build
 ```
 
-1. Run the test harness script:
+2. Run the test harness script:
 
 ```bash
 node dist/test-fixture-match.js
