@@ -81,8 +81,8 @@ export async function submitSnapshotIfPossible(opts: SubmitOpts): Promise<boolea
             if (!opts.quiet) console.error(chalk.red(`Failed to determine SHA for ${opts.owner}/${opts.repo} on branch ${opts.branch}`));
             return false;
         }
-        await run(opts.octokit, tmp, opts.owner, opts.repo, sha, opts.branch, opts.componentDetectionBinPath);
-        return true;
+        return await run(opts.octokit, tmp, opts.owner, opts.repo, sha, opts.branch, opts.componentDetectionBinPath);
+
     } catch (e) {
         if (!opts.quiet) console.error(chalk.red(`Component Detection failed: ${(e as Error).message}`));
         return false;
@@ -150,7 +150,7 @@ async function execGit(args: string[], opts: { cwd: string, quiet?: boolean }): 
     });
 }
 
-export async function run(octokit: Octokit, tmpDir: string, owner: string, repo: string, sha: string, ref: string, componentDetectionBinPath?: string) {
+export async function run(octokit: Octokit, tmpDir: string, owner: string, repo: string, sha: string, ref: string, componentDetectionBinPath?: string): Promise<boolean> {
 
     const componentDetection = new ComponentDetection(octokit, '', componentDetectionBinPath);
 
@@ -183,20 +183,22 @@ export async function run(octokit: Octokit, tmpDir: string, owner: string, repo:
         snapshot.addManifest(manifest);
     });
 
-    await submitSnapshot(octokit, snapshot, { owner, repo });
+    return await submitSnapshot(octokit, snapshot, { owner, repo });
 }
 
 /**
  * submitSnapshot submits a snapshot to the Dependency Submission API - vendored in from @github/dependency-submission-toolkit, to make it work at the CLI, vs in Actions.
  *
- * @param {Snapshot} snapshot
- * @param {Repo} repo
+ * @param {Octokit} octokit - The Octokit instance for GitHub API requests
+ * @param {Snapshot} snapshot - The dependency snapshot to submit
+ * @param {Repo} repo - The repository owner and name
+ * @returns {Promise<boolean>} true if submission was successful, false otherwise
  */
 export async function submitSnapshot(
     octokit: Octokit,
     snapshot: Snapshot,
     repo: { owner: string; repo: string }
-) {
+): Promise<boolean> {
     console.debug('Submitting snapshot...')
     console.debug(snapshot.prettyJSON())
 
@@ -218,10 +220,12 @@ export async function submitSnapshot(
                 `Snapshot successfully created at ${response.data.created_at.toString()}` +
                 ` with id ${response.data.id}`
             )
+            return true
         } else {
             console.error(
                 `Snapshot creation failed with result: "${result}: ${response.data.message}"`
             )
+            return false
         }
     } catch (error) {
         if (error instanceof RequestError) {
@@ -238,6 +242,6 @@ export async function submitSnapshot(
             console.error(error.message)
             if (error.stack) console.error(error.stack)
         }
-        throw new Error(`Failed to submit snapshot: ${error}`)
+        return false
     }
 }
