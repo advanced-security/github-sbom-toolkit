@@ -178,7 +178,7 @@ export async function run(octokit: Octokit, tmpDir: string, owner: string, repo:
         snapshot.addManifest(manifest);
     });
 
-    submitSnapshot(octokit, snapshot, { owner, repo });
+    await submitSnapshot(octokit, snapshot, { owner, repo });
 }
 
 /**
