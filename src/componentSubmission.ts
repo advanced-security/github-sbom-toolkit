@@ -77,13 +77,11 @@ export async function submitSnapshotIfPossible(opts: SubmitOpts): Promise<boolea
             return false;
         }
         await run(opts.octokit, tmp, opts.owner, opts.repo, sha, opts.branch, opts.componentDetectionBinPath);
-
+        return true;
     } catch (e) {
         if (!opts.quiet) console.error(chalk.red(`Component Detection failed: ${(e as Error).message}`));
         return false;
     }
-
-    return true;
 }
 
 function buildSparsePatterns(langs: string[]): string[] {
