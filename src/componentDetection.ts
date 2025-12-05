@@ -291,7 +291,7 @@ export default class ComponentDetection {
   private async getLatestReleaseURL(): Promise<string> {
     let octokit: Octokit = this.octokit;
 
-    if (this.baseUrl != 'https://api.github.com') {
+    if (this.baseUrl !== 'https://api.github.com') {
       octokit = new Octokit({
         auth: "", request: { fetch: fetch }, log: {
           debug: console.debug,
