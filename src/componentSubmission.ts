@@ -165,9 +165,11 @@ export async function run(octokit: Octokit, tmpDir: string, owner: string, repo:
         url: detectorUrl,
     };
 
+    const date = new Date().toISOString();
+
     const job: Job = {
         correlator: 'github-sbom-toolkit',
-        id: Math.floor(Math.random() * Number.MAX_SAFE_INTEGER).toString()
+        id: `${owner}-${repo}-${ref}-${date}-${Math.floor(Math.random() * Number.MAX_SAFE_INTEGER).toString()}`
     };
 
     let snapshot = new Snapshot(detector, undefined, job);
