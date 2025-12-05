@@ -63,10 +63,12 @@ export async function submitSnapshotIfPossible(opts: SubmitOpts): Promise<boolea
         throw new Error('Octokit instance is required in opts.octokit');
     }
 
+    const tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'cd-submission-'));
+
     try {
         const intersect = await getLanguageIntersection(opts.octokit, opts.owner, opts.repo, opts.languages);
         // Create temp dir and sparse checkout only manifest files according to selected languages
-        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cd-submission-'));
+
         console.debug(chalk.green(`Sparse checkout into ${tmp} for languages: ${intersect.join(', ')}`));
 
         const sha = await sparseCheckout(opts.owner, opts.repo, opts.branch, tmp, intersect, opts.baseUrl);
@@ -81,6 +83,9 @@ export async function submitSnapshotIfPossible(opts: SubmitOpts): Promise<boolea
     } catch (e) {
         if (!opts.quiet) console.error(chalk.red(`Component Detection failed: ${(e as Error).message}`));
         return false;
+    } finally {
+        // Clean up temp dir
+        await fs.promises.rm(tmp, { recursive: true, force: true });
     }
 }
 
@@ -142,10 +147,9 @@ async function execGit(args: string[], opts: { cwd: string, quiet?: boolean }): 
 
 export async function run(octokit: Octokit, tmpDir: string, owner: string, repo: string, sha: string, ref: string, componentDetectionBinPath?: string) {
 
-    let manifests = await ComponentDetection.scanAndGetManifests(
-        tmpDir,
-        componentDetectionBinPath
-    );
+    const componentDetection = new ComponentDetection(octokit, '', componentDetectionBinPath);
+
+    let manifests = await componentDetection.scanAndGetManifests(tmpDir);
 
     // Get detector configuration inputs
     const detectorName = "Component Detection in GitHub SBOM Toolkit: advanced-security/github-sbom-toolkit";
