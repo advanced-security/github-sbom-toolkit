@@ -13,7 +13,7 @@
     "dev": "tsx src/cli.ts",
     "lint": "eslint . --ext .ts --max-warnings=0",
     "test": "node dist/test-fixture-match.js",
-    "test:branch-search": "node dist/test-branch-search.js"
+    "test:branch-search": "node dist/test-branch-search.js && node dist/test-branch-search-cache.js"
   },
   "engines": {
     "node": ">=18.0.0"
