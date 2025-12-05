@@ -68,7 +68,6 @@ Flags:
 ```bash
 --branch-scan              # Fetch SBOMs for non-default branches
 --branch-limit <n>          # Max number of non-default branches per repo (default 10)
---dependency-review         # Fetch dependency review diffs (enabled by default)
 --diff-base <branch>        # Override base branch for diffs (default: repository default)
 ```
 
