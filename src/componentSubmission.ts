@@ -202,7 +202,7 @@ export async function submitSnapshot(
             'POST /repos/{owner}/{repo}/dependency-graph/snapshots',
             {
                 headers: {
-                    accept: 'application/vnd.github.foo-bar-preview+json'
+                    accept: 'application/vnd.github+json'
                 },
                 owner: repo.owner,
                 repo: repo.repo,
