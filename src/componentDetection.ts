@@ -13,7 +13,10 @@ import { StringDecoder } from 'node:string_decoder';
 
 export default class ComponentDetection {
   public static componentDetectionPath = process.platform === "win32" ? './component-detection.exe' : './component-detection';
-  public static outputPath = path.join(tmpdir(), `component-detection-output-${Date.now()}.json`);
+  public static outputPath = (() => {
+    const tmpDir = fs.mkdtempSync(path.join(tmpdir(), 'component-detection-'));
+    return path.join(tmpDir, 'output.json');
+  })();
 
   // This is the default entry point for this class.
   // If executablePath is provided, use it directly and skip download.
