@@ -127,8 +127,10 @@ function buildSparsePatterns(langs: string[]): string[] {
             add('**/*.sln');
         }
     }
-    // Always include root lockfiles just in case
-    add('package.json'); add('package-lock.json'); add('yarn.lock'); add('pnpm-lock.yaml');
+    // Include root lockfiles only if JavaScript/TypeScript is among selected languages
+    if (langs.some(l => ['javascript', 'typescript', 'node', 'js', 'ts'].includes(l.toLowerCase()))) {
+        add('package.json'); add('package-lock.json'); add('yarn.lock'); add('pnpm-lock.yaml');
+    }
     return Array.from(set);
 }
 
