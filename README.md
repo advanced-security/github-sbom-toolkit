@@ -85,7 +85,7 @@ If a branch SBOM or diff retrieval fails, the error is recorded but does not sto
 
 #### Handling Missing Dependency Review Snapshots
 
-If the Dependency Review API returns a 404 for a branch diff (commonly due to a missing dependency snapshot on either the base or head commit), the toolkit can optionally attempt to generate and submit a snapshot using Component Detection and Dependency Submission. This is vendored-in and forked from the public [Component Detection Dependency Submission Action](https://github.com/your-org/component-detection-dependency-submission-action).
+If the Dependency Review API returns a 404 for a branch diff (commonly due to a missing dependency snapshot on either the base or head commit), the toolkit can optionally attempt to generate and submit a snapshot using Component Detection and Dependency Submission. This is vendored-in and forked from the public [Component Detection Dependency Submission Action](https://github.com/advanced-security/component-detection-dependency-submission-action).
 
 Enable automatic submission + retry with:
 
