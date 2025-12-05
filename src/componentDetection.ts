@@ -68,7 +68,7 @@ export default class ComponentDetection {
 
       // Write the blob to a file
       console.debug(`Writing binary to file ${this.componentDetectionPath}`);
-      await fs.writeFileSync(this.componentDetectionPath, buffer, { mode: 0o777, flag: 'w' });
+      await fs.writeFileSync(this.componentDetectionPath, buffer, { mode: 0o755, flag: 'w' });
     } catch (error: any) {
       console.error(error);
     }
