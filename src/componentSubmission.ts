@@ -25,7 +25,7 @@ export interface SubmitOpts {
     componentDetectionBinPath?: string; // optional path to component-detection executable
 }
 
-export async function getLanguageIntersection(octokit: any, owner: string, repo: string, languages: string[] | undefined, quiet: boolean = false): Promise<string[]> {
+export async function getLanguageIntersection(octokit: Octokit, owner: string, repo: string, languages: string[] | undefined, quiet: boolean = false): Promise<string[]> {
     const langResp = await octokit.request('GET /repos/{owner}/{repo}/languages', { owner, repo });
     const repoLangs = Object.keys(langResp.data || {});
     const wanted = languages;
