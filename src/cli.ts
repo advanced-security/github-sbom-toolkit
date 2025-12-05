@@ -58,7 +58,7 @@ async function main() {
         if (!args.enterprise && !args.org && !args.repo) throw new Error("Provide --enterprise, --org or --repo with --sync-sboms");
         if (args.enterprise && args.org) throw new Error("Specify only one of --enterprise or --org");
         if (args.repo && (args.enterprise || args.org)) throw new Error("Specify only one of --enterprise, --org, or --repo");
-        if (!args.sbomCache) throw new Error("--sync-sboms requires --sbom-cache to write updated SBOMs to disk");
+        if (syncing && !args.sbomCache) throw new Error("--sync-sboms requires --sbom-cache to write updated SBOMs to disk");
       } else {
         const malwareOnly = !!args["sync-malware"] && !args.sbomCache && !args.purl && !args["purl-file"] && !args["match-malware"] && !args.uploadSarif && !args.interactive;
         if (!malwareOnly && !args.sbomCache) throw new Error("Offline mode requires --sbom-cache unless running --sync-malware by itself");

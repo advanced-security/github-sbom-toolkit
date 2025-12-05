@@ -68,7 +68,6 @@ Flags:
 ```bash
 --branch-scan              # Fetch SBOMs for non-default branches
 --branch-limit <n>          # Max number of non-default branches per repo (default 10)
---dependency-review         # Fetch dependency review diffs (enabled by default)
 --diff-base <branch>        # Override base branch for diffs (default: repository default)
 ```
 
@@ -172,7 +171,7 @@ npm run start -- --sbom-cache sboms --purl-file queries.txt
 npm run start -- --sync-sboms --org my-org --sbom-cache sboms
 ```
 
-1. Later offline search (no API calls; uses previously written per‑repo JSON):
+2. Later offline search (no API calls; uses previously written per‑repo JSON):
 
 ```bash
 npm run start -- --sbom-cache sboms --purl pkg:npm/react@18.2.0
@@ -442,7 +441,7 @@ npm install
 npm run build
 ```
 
-1. Run the test harness script:
+2. Run the test harness script:
 
 ```bash
 node dist/test-fixture-match.js

@@ -117,13 +117,12 @@ export interface DependencyReviewPackageChange {
   license?: string;
   manifest?: string; // manifest path
   scope?: string; // e.g. runtime, development
-  previousVersion?: string; // for updated/removed
-  newVersion?: string; // for added/updated
+  version?: string; // for added/removed
   [k: string]: unknown;
 }
 
 export interface BranchDependencyDiff {
-  latestCommitDate: string;
+  latestCommitDate?: string;
   base: string; // base branch
   head: string; // head branch
   retrievedAt: string;

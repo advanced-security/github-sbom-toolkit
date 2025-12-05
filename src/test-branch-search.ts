@@ -20,19 +20,18 @@ async function main() {
     { name: 'react', version: '18.2.0', purl: 'pkg:npm/react@18.2.0' }
   ];
   const diffChanges = [
-    { changeType: 'added', name: 'lodash', ecosystem: 'npm', purl: 'pkg:npm/lodash@4.17.21', newVersion: '4.17.21' },
-    { changeType: 'updated', name: 'react', ecosystem: 'npm', purl: 'pkg:npm/react@18.3.0-beta', previousVersion: '18.2.0', newVersion: '18.3.0-beta' }
+    { changeType: 'added', name: 'lodash', ecosystem: 'npm', purl: 'pkg:npm/lodash@4.17.21', version: '4.17.21' },
+    { changeType: 'updated', name: 'react', ecosystem: 'npm', purl: 'pkg:npm/react@18.3.0', version: '18.3.0' },
+    { changeType: 'removed', name: 'chalk', ecosystem: 'npm', purl: 'pkg:npm/chalk@5.6.1', version: '5.6.1' },
+    { changeType: 'removed', name: 'react', ecosystem: 'npm', purl: 'pkg:npm/react@18.2.0', version: '18.2.0' }
   ];
 
-  const synthetic: RepositorySbom = {
+  const synthetic = {
     repo: `${org}/${repo}`,
-    org,
+    org: org,
     retrievedAt: new Date().toISOString(),
     packages: basePackages,
-    // Use Map keyed by branch name per updated type
-    branchDiffs: new Map<string, any>([
-      [
-        'feature-x',
+    branchDiffs: [
         {
           latestCommitDate: new Date().toISOString(),
           base: 'main',
@@ -41,8 +40,7 @@ async function main() {
           changes: diffChanges
         }
       ]
-    ])
-  } as RepositorySbom;
+  };
 
   fs.writeFileSync(path.join(repoDir, 'sbom.json'), JSON.stringify(synthetic, null, 2), 'utf8');
 
@@ -57,9 +55,12 @@ async function main() {
 
   const queries = [
     'pkg:npm/react@>=18.2.0 <19.0.0', // should match base & branch updated version
-    'pkg:npm/lodash@4.17.21',          // should match added in branch diff & branch SBOM
+    'pkg:npm/lodash@4.17.21',          // should match added in branch diff
     'pkg:npm/chalk@5.6.1'              // base only
   ];
+
+  console.debug(JSON.stringify(collector.getAllSboms()));
+
   const results = collector.searchByPurlsWithReasons(queries);
 
   if (!results.size) {

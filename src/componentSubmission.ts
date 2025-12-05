@@ -25,7 +25,7 @@ export interface SubmitOpts {
     componentDetectionBinPath?: string; // optional path to component-detection executable
 }
 
-export async function getLanguageIntersection(octokit: any, owner: string, repo: string, languages: string[] | undefined, quiet: boolean = false): Promise<string[]> {
+export async function getLanguageIntersection(octokit: Octokit, owner: string, repo: string, languages: string[] | undefined, quiet: boolean = false): Promise<string[]> {
     const langResp = await octokit.request('GET /repos/{owner}/{repo}/languages', { owner, repo });
     const repoLangs = Object.keys(langResp.data || {});
     const wanted = languages;
@@ -63,10 +63,15 @@ export async function submitSnapshotIfPossible(opts: SubmitOpts): Promise<boolea
         throw new Error('Octokit instance is required in opts.octokit');
     }
 
+    const tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'cd-submission-'));
+
     try {
         const intersect = await getLanguageIntersection(opts.octokit, opts.owner, opts.repo, opts.languages);
         // Create temp dir and sparse checkout only manifest files according to selected languages
-        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cd-submission-'));
+        if (!intersect.length) {
+            // No matching languages, skip submission
+            return false;
+        }
         console.debug(chalk.green(`Sparse checkout into ${tmp} for languages: ${intersect.join(', ')}`));
 
         const sha = await sparseCheckout(opts.owner, opts.repo, opts.branch, tmp, intersect, opts.baseUrl);
@@ -81,6 +86,9 @@ export async function submitSnapshotIfPossible(opts: SubmitOpts): Promise<boolea
     } catch (e) {
         if (!opts.quiet) console.error(chalk.red(`Component Detection failed: ${(e as Error).message}`));
         return false;
+    } finally {
+        // Clean up temp dir
+        await fs.promises.rm(tmp, { recursive: true, force: true });
     }
 }
 
@@ -122,8 +130,10 @@ function buildSparsePatterns(langs: string[]): string[] {
             add('**/*.sln');
         }
     }
-    // Always include root lockfiles just in case
-    add('package.json'); add('package-lock.json'); add('yarn.lock'); add('pnpm-lock.yaml');
+    // Include root lockfiles only if JavaScript/TypeScript is among selected languages
+    if (langs.some(l => ['javascript', 'typescript', 'node', 'js', 'ts'].includes(l.toLowerCase()))) {
+        add('package.json'); add('package-lock.json'); add('yarn.lock'); add('pnpm-lock.yaml');
+    }
     return Array.from(set);
 }
 
@@ -142,10 +152,9 @@ async function execGit(args: string[], opts: { cwd: string, quiet?: boolean }): 
 
 export async function run(octokit: Octokit, tmpDir: string, owner: string, repo: string, sha: string, ref: string, componentDetectionBinPath?: string): Promise<boolean> {
 
-    let manifests = await ComponentDetection.scanAndGetManifests(
-        tmpDir,
-        componentDetectionBinPath
-    );
+    const componentDetection = new ComponentDetection(octokit, '', componentDetectionBinPath);
+
+    let manifests = await componentDetection.scanAndGetManifests(tmpDir);
 
     // Get detector configuration inputs
     const detectorName = "Component Detection in GitHub SBOM Toolkit: advanced-security/github-sbom-toolkit";
@@ -198,7 +207,7 @@ export async function submitSnapshot(
             'POST /repos/{owner}/{repo}/dependency-graph/snapshots',
             {
                 headers: {
-                    accept: 'application/vnd.github.foo-bar-preview+json'
+                    accept: 'application/vnd.github+json'
                 },
                 owner: repo.owner,
                 repo: repo.repo,

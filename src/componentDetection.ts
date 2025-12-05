@@ -1,4 +1,4 @@
-import { Octokit } from "octokit"
+import { Octokit } from "@octokit/core";
 import {
   PackageCache,
   Package,
@@ -11,16 +11,30 @@ import path from 'path';
 import { tmpdir } from 'os';
 import { StringDecoder } from 'node:string_decoder';
 
-export default class ComponentDetection {
-  public static componentDetectionPath = process.platform === "win32" ? './component-detection.exe' : './component-detection';
-  public static outputPath = path.join(tmpdir(), `component-detection-output-${Date.now()}.json`);
+export default class ComponentDetection { 
+  public componentDetectionPath: string = process.platform === "win32" ? './component-detection.exe' : './component-detection';
+  public outputPath: string;
+  octokit: Octokit;
+  baseUrl: string;
+
+  constructor(octokit: Octokit, baseUrl: string, executablePath?: string) {
+    this.octokit = octokit;
+    this.baseUrl = baseUrl;
+    if (executablePath) {
+      this.componentDetectionPath = executablePath;
+    }
+
+    // Set the output path
+    this.outputPath = (() => {
+      const tmpDir = fs.mkdtempSync(path.join(tmpdir(), 'component-detection-'));
+      return path.join(tmpDir, 'output.json');
+    })();
+  }
 
   // This is the default entry point for this class.
   // If executablePath is provided, use it directly and skip download.
-  static async scanAndGetManifests(path: string, executablePath?: string): Promise<Manifest[] | undefined> {
-    if (executablePath) {
-      this.componentDetectionPath = executablePath;
-    } else {
+  async scanAndGetManifests(path: string): Promise<Manifest[] | undefined> {
+    if (!this.componentDetectionPath) {
       await this.downloadLatestRelease();
     }
 
@@ -34,7 +48,7 @@ export default class ComponentDetection {
     return await this.getManifestsFromResults(this.outputPath, path);
   }
   // Get the latest release from the component-detection repo, download the tarball, and extract it
-  public static async downloadLatestRelease() {
+  public async downloadLatestRelease() {
     try {
       const statResult = fs.statSync(this.componentDetectionPath);
       if (statResult && statResult.isFile()) {
@@ -54,14 +68,14 @@ export default class ComponentDetection {
 
       // Write the blob to a file
       console.debug(`Writing binary to file ${this.componentDetectionPath}`);
-      await fs.writeFileSync(this.componentDetectionPath, buffer, { mode: 0o777, flag: 'w' });
+      await fs.writeFileSync(this.componentDetectionPath, buffer, { mode: 0o755, flag: 'w' });
     } catch (error: any) {
       console.error(error);
     }
   }
 
   // Run the component-detection CLI on the path specified
-  public static runComponentDetection(path: string): Promise<boolean> {
+  public runComponentDetection(path: string): Promise<boolean> {
     console.debug(`Running component-detection on ${path}`);
 
     console.debug(`Writing to output file: ${this.outputPath}`);
@@ -102,7 +116,7 @@ export default class ComponentDetection {
     });
   }
 
-  public static async getManifestsFromResults(file: string, path: string): Promise<Manifest[] | undefined> {
+  public async getManifestsFromResults(file: string, path: string): Promise<Manifest[] | undefined> {
     console.debug(`Reading results from ${file}`);
     const results = await fs.readFileSync(file, 'utf8');
     const json: any = JSON.parse(results);
@@ -112,7 +126,7 @@ export default class ComponentDetection {
     return this.processComponentsToManifests(json.componentsFound, dependencyGraphs);
   }
 
-  public static processComponentsToManifests(componentsFound: any[], dependencyGraphs: DependencyGraphs): Manifest[] {
+  public processComponentsToManifests(componentsFound: any[], dependencyGraphs: DependencyGraphs): Manifest[] {
     // Parse the result file and add the packages to the package cache
     const packageCache = new PackageCache();
     const packages: Array<ComponentDetectionPackage> = [];
@@ -193,7 +207,7 @@ export default class ComponentDetection {
     return manifests;
   }
 
-  private static addPackagesToManifests(packages: Array<ComponentDetectionPackage>, manifests: Array<Manifest>, dependencyGraphs: DependencyGraphs): void {
+  private addPackagesToManifests(packages: Array<ComponentDetectionPackage>, manifests: Array<Manifest>, dependencyGraphs: DependencyGraphs): void {
     packages.forEach((pkg: ComponentDetectionPackage) => {
       pkg.locationsFoundAt.forEach((location: any) => {
         // Use the normalized path (remove leading slash if present)
@@ -250,7 +264,7 @@ export default class ComponentDetection {
     }
 
     try {
-      var packageUrl = `${packageUrlJson.Scheme}:${packageUrlJson.Type}/`;
+      let packageUrl = `${packageUrlJson.Scheme}:${packageUrlJson.Type}/`;
       if (packageUrlJson.Namespace) {
         packageUrl += `${packageUrlJson.Namespace.replaceAll("@", "%40")}/`;
       }
@@ -274,28 +288,23 @@ export default class ComponentDetection {
     }
   }
 
-  private static async getLatestReleaseURL(): Promise<string> {
-    let githubToken = process.env.GITHUB_TOKEN || "";
+  private async getLatestReleaseURL(): Promise<string> {
+    let octokit: Octokit = this.octokit;
 
-    const githubAPIURL = process.env.GITHUB_API_URL || 'https://api.github.com';
-
-    let ghesMode = process.env.GITHUB_API_URL != githubAPIURL;
-    // If the we're running in GHES, then use an empty string as the token
-    if (ghesMode) {
-      githubToken = "";
+    if (this.baseUrl !== 'https://api.github.com') {
+      octokit = new Octokit({
+        auth: "", request: { fetch: fetch }, log: {
+          debug: console.debug,
+          info: console.info,
+          warn: console.warn,
+          error: console.error
+        },
+      });
     }
-    const octokit = new Octokit({
-      auth: githubToken, baseUrl: githubAPIURL, request: { fetch: fetch }, log: {
-        debug: console.debug,
-        info: console.info,
-        warn: console.warn,
-        error: console.error
-      },
-    });
 
     const owner = "microsoft";
     const repo = "component-detection";
-    console.debug("Attempting to download latest release from " + githubAPIURL);
+    console.debug(`Attempting to download latest release from ${owner}/${repo}`);
 
     try {
       const latestRelease = await octokit.request("GET /repos/{owner}/{repo}/releases/latest", { owner, repo });
@@ -325,7 +334,7 @@ export default class ComponentDetection {
    * @param filePathInput The filePath input (relative or absolute) from the action configuration.
    * @returns A new DependencyGraphs object with relative path keys.
    */
-  public static normalizeDependencyGraphPaths(
+  public normalizeDependencyGraphPaths(
     dependencyGraphs: DependencyGraphs,
     filePathInput: string
   ): DependencyGraphs {
