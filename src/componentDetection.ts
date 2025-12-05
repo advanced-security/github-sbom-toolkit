@@ -364,11 +364,19 @@ export default class ComponentDetection {
   }
 }
 
+/**
+ * Type for referrer objects in topLevelReferrers array
+ */
+type TopLevelReferrer = {
+  packageUrl?: any;
+  packageUrlString?: string;
+};
+
 class ComponentDetectionPackage extends Package {
   public packageUrlString: string;
 
-  constructor(packageUrl: string, public id: string, public isDevelopmentDependency: boolean, public topLevelReferrers: any[],
-    public locationsFoundAt: any[], public containerDetailIds: any[], public containerLayerIds: any[]) {
+  constructor(packageUrl: string, public id: string, public isDevelopmentDependency: boolean, public topLevelReferrers: TopLevelReferrer[],
+    public locationsFoundAt: string[], public containerDetailIds: string[], public containerLayerIds: string[]) {
     super(packageUrl);
     this.packageUrlString = packageUrl;
   }
