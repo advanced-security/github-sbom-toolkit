@@ -32,14 +32,14 @@ async function main() {
     retrievedAt: new Date().toISOString(),
     packages: basePackages,
     branchDiffs: [
-        {
-          latestCommitDate: new Date().toISOString(),
-          base: 'main',
-          head: 'feature-x',
-          retrievedAt: new Date().toISOString(),
-          changes: diffChanges
-        }
-      ]
+      {
+        latestCommitDate: new Date().toISOString(),
+        base: 'main',
+        head: 'feature-x',
+        retrievedAt: new Date().toISOString(),
+        changes: diffChanges
+      }
+    ]
   };
 
   fs.writeFileSync(path.join(repoDir, 'sbom.json'), JSON.stringify(synthetic, null, 2), 'utf8');

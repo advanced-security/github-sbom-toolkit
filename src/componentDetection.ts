@@ -11,7 +11,7 @@ import path from 'path';
 import { tmpdir } from 'os';
 import { StringDecoder } from 'node:string_decoder';
 
-export default class ComponentDetection { 
+export default class ComponentDetection {
   public componentDetectionPath: string = process.platform === "win32" ? './component-detection.exe' : './component-detection';
   public outputPath: string;
   octokit: Octokit;

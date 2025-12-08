@@ -350,7 +350,7 @@ export class SbomCollector {
         renderBar();
       }));
       await Promise.all(tasks);
-      
+
       newSboms = newSboms.filter(s => {
         const repoToCheck = s.repo.includes("/") ? s.repo.split("/")[1] : s.repo;
         return repoNames.has(repoToCheck);

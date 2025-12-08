@@ -94,7 +94,7 @@ async function main() {
   if (debug) {
     console.debug(chalk.blue("Debug logging enabled"));
   } else {
-    console.debug = () => {};
+    console.debug = () => { };
   }
 
   const token = argv.token as string | undefined || process.env.GITHUB_TOKEN;
@@ -113,7 +113,7 @@ async function main() {
   const wantCsv = !!argv.csv;
   const hasOutputFile = !!argv.outputFile;
   const wantCli = !!argv.cli && hasOutputFile; // only allow CLI alongside machine output when writing file
-  
+
   let sboms: RepositorySbom[] = [];
   let summary: CollectionSummary | undefined;
 
