@@ -140,9 +140,6 @@ async function main() {
     submitOnMissingSnapshot: argv["submit-on-missing-snapshot"] as boolean,
     forceSubmission: argv["force-submission"] as boolean,
     submitLanguages: (argv["submit-languages"] as string[] | undefined) || undefined,
-    // Pass through as part of options bag used by submission helper via collector
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore
     componentDetectionBinPath: argv["component-detection-bin"] as string | undefined,
   }) : undefined;
 
