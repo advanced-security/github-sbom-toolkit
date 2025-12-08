@@ -502,6 +502,9 @@ export class SbomCollector {
 
   private async fetchDependencyReviewDiff(org: string, repo: string, base: string, head: string, retries: number, latestCommit?: { sha?: string; commitDate?: string }): Promise<BranchDependencyDiff> {
     if (!this.octokit) throw new Error("No Octokit instance");
+    if (retries < 0) {
+      return { latestCommitDate: undefined, base, head, retrievedAt: new Date().toISOString(), changes: [], error: "Exceeded maximum retries for fetching dependency review diff" };
+    }
     try {
       const basehead = `${base}...${head}`;
       const resp = await this.octokit.request("GET /repos/{owner}/{repo}/dependency-graph/compare/{basehead}", { owner: org, repo, basehead, headers: { Accept: "application/vnd.github+json" } });
@@ -537,7 +540,7 @@ export class SbomCollector {
             if (ok) {
               console.log(chalk.blue(`Snapshot submission attempted; waiting 3 seconds before retrying dependency review diff for ${org}/${repo} ${base}...${head}...`));
               await new Promise(r => setTimeout(r, 3000));
-              return await this.fetchDependencyReviewDiff(org, repo, base, head, retries--, latestCommit);
+              return await this.fetchDependencyReviewDiff(org, repo, base, head, --retries, latestCommit);
             }
           } catch (subErr) {
             console.error(chalk.red(`Snapshot submission failed for ${org}/${repo} branch ${head}: ${(subErr as Error).message}`));
