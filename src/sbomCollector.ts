@@ -537,7 +537,7 @@ export class SbomCollector {
             if (ok) {
               console.log(chalk.blue(`Snapshot submission attempted; waiting 3 seconds before retrying dependency review diff for ${org}/${repo} ${base}...${head}...`));
               await new Promise(r => setTimeout(r, 3000));
-              return await this.fetchDependencyReviewDiff(org, repo, base, head, retries--, latestCommit);
+              return await this.fetchDependencyReviewDiff(org, repo, base, head, retries - 1, latestCommit);
             }
           } catch (subErr) {
             console.error(chalk.red(`Snapshot submission failed for ${org}/${repo} branch ${head}: ${(subErr as Error).message}`));
