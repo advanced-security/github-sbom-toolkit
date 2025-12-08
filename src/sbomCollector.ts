@@ -545,7 +545,7 @@ export class SbomCollector {
             if (ok) {
               // Delay after snapshot submission to allow GitHub to ingest and process the snapshot
               // before retrying the dependency review API. This helps avoid 404 errors on retry.
-              console.log(chalk.blue(`Snapshot submission attempted; waiting ${this.opts.retryIngestionDelayMs}ms before retrying dependency review diff for ${org}/${repo} ${base}...${head}...`));
+              console.log(chalk.blue(`Snapshot submission attempted; waiting ${this.opts.retryIngestionDelayMs / 1000} seconds before retrying dependency review diff for ${org}/${repo} ${base}...${head}...`));
               await new Promise(r => setTimeout(r, this.opts.retryIngestionDelayMs));
               return await this.fetchDependencyReviewDiff(org, repo, base, head, retries - 1, latestCommit);
             }
