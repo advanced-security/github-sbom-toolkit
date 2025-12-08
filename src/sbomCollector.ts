@@ -260,7 +260,7 @@ export class SbomCollector {
             this.decisions[fullName] = `Fetching because error comparing pushed_at (${baseline.repoPushedAt} / ${repo.pushed_at})`;
           }
         } else {
-          this.decisions[fullName] = baseline ? `Fetching because missing pushed_at (${baseline.repoPushedAt} / ${repo.pushed_at})` : "Fetching because no baseline";
+          this.decisions[fullName] = baseline ? `Fetching because of missing pushed_at (${baseline.repoPushedAt} / ${repo.pushed_at})` : "Fetching because no baseline";
         }
 
         let sbom: RepositorySbom | undefined = undefined;
