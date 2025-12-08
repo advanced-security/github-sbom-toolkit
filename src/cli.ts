@@ -51,6 +51,8 @@ async function main() {
     .option("submit-languages", { type: "array", describe: "Limit snapshot submission to these languages (e.g., JavaScript,TypeScript,Python,Maven)." })
     .option("component-detection-bin", { type: "string", describe: "Path to a local component-detection executable to use for snapshot submission (skips download)." })
     .option("force-submission", { type: "boolean", default: false, describe: "Always run Dependency Submission for scanned branches before fetching diffs." })
+    .option("snapshot-ingestion-delay", { type: "number", default: 1500, describe: "Delay (ms) after snapshot submission to allow ingestion before dependency review (default: 1500ms)" })
+    .option("retry-ingestion-delay", { type: "number", default: 3000, describe: "Delay (ms) after snapshot submission before retrying dependency review on 404 (default: 3000ms)" })
     .option("debug", { type: "boolean", default: false, describe: "Enable debug logging" })
     .check(args => {
       const syncing = !!args.syncSboms;
@@ -141,6 +143,8 @@ async function main() {
     forceSubmission: argv["force-submission"] as boolean,
     submitLanguages: (argv["submit-languages"] as string[] | undefined) || undefined,
     componentDetectionBinPath: argv["component-detection-bin"] as string | undefined,
+    snapshotIngestionDelayMs: argv["snapshot-ingestion-delay"] as number | undefined,
+    retryIngestionDelayMs: argv["retry-ingestion-delay"] as number | undefined,
   }) : undefined;
 
   if (collector && (argv.sbomCache || argv.syncSboms)) {
