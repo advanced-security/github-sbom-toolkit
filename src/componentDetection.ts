@@ -215,7 +215,7 @@ export default class ComponentDetection {
         // Unescape the path, as upstream ComponentDetection emits locationsFoundAt in URL-encoded form
         normalizedLocation = decodeURIComponent(normalizedLocation);
 
-        if (!manifests.find((manifest: Manifest) => manifest.name == normalizedLocation)) {
+        if (!manifests.find((manifest: Manifest) => manifest.name === normalizedLocation)) {
           const manifest = new Manifest(normalizedLocation, normalizedLocation);
           manifests.push(manifest);
         }
@@ -229,14 +229,14 @@ export default class ComponentDetection {
         const directDependencies = depGraphEntry.explicitlyReferencedComponentIds;
         if (directDependencies.includes(pkg.id)) {
           manifests
-            .find((manifest: Manifest) => manifest.name == normalizedLocation)
+            .find((manifest: Manifest) => manifest.name === normalizedLocation)
             ?.addDirectDependency(
               pkg,
               ComponentDetection.getDependencyScope(pkg)
             );
         } else {
           manifests
-            .find((manifest: Manifest) => manifest.name == normalizedLocation)
+            .find((manifest: Manifest) => manifest.name === normalizedLocation)
             ?.addIndirectDependency(
               pkg,
               ComponentDetection.getDependencyScope(pkg)
