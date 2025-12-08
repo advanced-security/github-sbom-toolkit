@@ -34,7 +34,7 @@ export default class ComponentDetection {
   // This is the default entry point for this class.
   // If executablePath is provided, use it directly and skip download.
   async scanAndGetManifests(path: string): Promise<Manifest[] | undefined> {
-    if (!this.componentDetectionPath) {
+    if (!fs.existsSync(this.componentDetectionPath)) {
       await this.downloadLatestRelease();
     }
 
