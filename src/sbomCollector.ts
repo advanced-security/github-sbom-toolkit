@@ -325,7 +325,7 @@ export class SbomCollector {
                   console.error(chalk.red(`Force submission failed for ${fullName} branch ${b.name}: ${(subErr as Error).message}`));
                 }
               }
-              const diff = await this.fetchDependencyReviewDiff(org, repo.name, base, b.name, 1);
+              const diff = await this.fetchDependencyReviewDiff(org, repo.name, base, b.name, latestCommit, 1);
               branchDiffs.set(b.name, diff);
             }
             if (branchDiffs.size) sbom.branchDiffs = branchDiffs;
@@ -499,10 +499,7 @@ export class SbomCollector {
     return branches;
   }
 
-  private async fetchDependencyReviewDiff(org: string, repo: string, base: string, head: string, retries: number): Promise<BranchDependencyDiff> {
-    if (retries <= 0) {
-      return { latestCommitDate: undefined, base, head, retrievedAt: new Date().toISOString(), changes: [], error: "Maximum retries exceeded" };
-    }
+  private async fetchDependencyReviewDiff(org: string, repo: string, base: string, head: string, latestCommit?: { sha?: string; commitDate?: string, retries: number }): Promise<BranchDependencyDiff> {
     if (!this.octokit) throw new Error("No Octokit instance");
     try {
       const basehead = `${base}...${head}`;
@@ -525,7 +522,7 @@ export class SbomCollector {
         };
         changes.push(change);
       }
-      return { latestCommitDate: new Date().toISOString(), base, head, retrievedAt: new Date().toISOString(), changes };
+      return { latestCommitDate: latestCommit?.commitDate || new Date().toISOString(), base, head, retrievedAt: new Date().toISOString(), changes };
     } catch (e) {
       const status = (e as { status?: number })?.status;
       let reason = e instanceof Error ? e.message : String(e);
@@ -539,7 +536,7 @@ export class SbomCollector {
             if (ok) {
               console.log(chalk.blue(`Snapshot submission attempted; waiting 3 seconds before retrying dependency review diff for ${org}/${repo} ${base}...${head}...`));
               await new Promise(r => setTimeout(r, 3000));
-              return await this.fetchDependencyReviewDiff(org, repo, base, head, retries--);
+              return await this.fetchDependencyReviewDiff(org, repo, base, head, latestCommit, retries--);
             }
           } catch (subErr) {
             console.error(chalk.red(`Snapshot submission failed for ${org}/${repo} branch ${head}: ${(subErr as Error).message}`));
