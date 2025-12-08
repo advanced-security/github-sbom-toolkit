@@ -70,7 +70,7 @@ export async function submitSnapshotIfPossible(opts: SubmitOpts): Promise<boolea
         // Create temp dir and sparse checkout only manifest files according to selected languages
         if (!intersect.length) {
             // No matching languages, skip submission
-            return false;
+            return true;
         }
         console.debug(chalk.green(`Sparse checkout into ${tmp} for languages: ${intersect.join(', ')}`));
 

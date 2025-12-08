@@ -318,14 +318,15 @@ export class SbomCollector {
               if (this.opts.forceSubmission) {
                 try {
                   console.debug(chalk.blue(`Force-submission enabled: submitting component snapshot for ${fullName} branch ${b.name}...`));
-                  await submitSnapshotIfPossible({ octokit: this.octokit, owner: org, repo: repo.name, branch: b.name, languages: this.opts.submitLanguages, quiet: this.opts.quiet, componentDetectionBinPath: this.opts.componentDetectionBinPath });
-                  // brief delay to allow snapshot ingestion
-                  await new Promise(r => setTimeout(r, 1500));
+                  if (await submitSnapshotIfPossible({ octokit: this.octokit, owner: org, repo: repo.name, branch: b.name, languages: this.opts.submitLanguages, quiet: this.opts.quiet, componentDetectionBinPath: this.opts.componentDetectionBinPath })) {
+                    // brief delay to allow snapshot ingestion
+                    await new Promise(r => setTimeout(r, 1500));
+                  }
                 } catch (subErr) {
                   console.error(chalk.red(`Force submission failed for ${fullName} branch ${b.name}: ${(subErr as Error).message}`));
                 }
               }
-              const diff = await this.fetchDependencyReviewDiff(org, repo.name, base, b.name, latestCommit, 1);
+              const diff = await this.fetchDependencyReviewDiff(org, repo.name, base, b.name, 1, latestCommit);
               branchDiffs.set(b.name, diff);
             }
             if (branchDiffs.size) sbom.branchDiffs = branchDiffs;
@@ -499,7 +500,7 @@ export class SbomCollector {
     return branches;
   }
 
-  private async fetchDependencyReviewDiff(org: string, repo: string, base: string, head: string, latestCommit?: { sha?: string; commitDate?: string, retries: number }): Promise<BranchDependencyDiff> {
+  private async fetchDependencyReviewDiff(org: string, repo: string, base: string, head: string, retries: number, latestCommit?: { sha?: string; commitDate?: string }): Promise<BranchDependencyDiff> {
     if (!this.octokit) throw new Error("No Octokit instance");
     try {
       const basehead = `${base}...${head}`;
@@ -536,7 +537,7 @@ export class SbomCollector {
             if (ok) {
               console.log(chalk.blue(`Snapshot submission attempted; waiting 3 seconds before retrying dependency review diff for ${org}/${repo} ${base}...${head}...`));
               await new Promise(r => setTimeout(r, 3000));
-              return await this.fetchDependencyReviewDiff(org, repo, base, head, latestCommit, retries--);
+              return await this.fetchDependencyReviewDiff(org, repo, base, head, retries--, latestCommit);
             }
           } catch (subErr) {
             console.error(chalk.red(`Snapshot submission failed for ${org}/${repo} branch ${head}: ${(subErr as Error).message}`));
