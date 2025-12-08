@@ -131,7 +131,7 @@ export default class ComponentDetection {
     const packageCache = new PackageCache();
     const packages: Array<ComponentDetectionPackage> = [];
 
-    componentsFound.forEach(async (component: any) => {
+    for (const component of componentsFound) {
       // Skip components without packageUrl
       if (!component.component.packageUrl) {
         console.debug(`Skipping component detected without packageUrl: ${JSON.stringify({
@@ -139,7 +139,7 @@ export default class ComponentDetection {
           name: component.component.name || 'unnamed',
           type: component.component.type || 'unknown'
         }, null, 2)}`);
-        return;
+        continue;
       }
 
       console.debug(`Processing component: ${component.component.id}`);
@@ -150,7 +150,7 @@ export default class ComponentDetection {
       // Skip if the packageUrl is empty (indicates an invalid or missing packageUrl)
       if (!packageUrl) {
         console.debug(`Skipping component with invalid packageUrl: ${component.component.id}`);
-        return;
+        continue;
       }
 
       if (!packageCache.hasPackage(packageUrl)) {
@@ -159,16 +159,16 @@ export default class ComponentDetection {
         packageCache.addPackage(pkg);
         packages.push(pkg);
       }
-    });
+    }
 
     // Set the transitive dependencies
     console.debug("Sorting out transitive dependencies");
-    packages.forEach(async (pkg: ComponentDetectionPackage) => {
-      pkg.topLevelReferrers.forEach(async (referrer: any) => {
+    for (const pkg of packages) {
+      for (const referrer of pkg.topLevelReferrers) {
         // Skip if referrer doesn't have a valid packageUrl
         if (!referrer.packageUrl) {
           console.debug(`Skipping referrer without packageUrl for component: ${pkg.id}`);
-          return;
+          continue;
         }
 
         const referrerUrl = ComponentDetection.makePackageUrl(referrer.packageUrl);
@@ -177,14 +177,14 @@ export default class ComponentDetection {
         // Skip if the generated packageUrl is empty
         if (!referrerUrl) {
           console.debug(`Skipping referrer with invalid packageUrl for component: ${pkg.id}`);
-          return;
+          continue;
         }
 
         try {
           const referrerPackage = packageCache.lookupPackage(referrerUrl);
           if (referrerPackage === pkg) {
             console.debug(`Found self-reference for package: ${pkg.id}`);
-            return; // Skip self-references
+            continue; // Skip self-references
           }
           if (referrerPackage) {
             referrerPackage.dependsOn(pkg);
@@ -192,8 +192,8 @@ export default class ComponentDetection {
         } catch (error) {
           console.debug(`Error looking up referrer package: ${error}`);
         }
-      });
-    });
+      }
+    }
 
     // Create manifests
     const manifests: Array<Manifest> = [];
@@ -364,11 +364,19 @@ export default class ComponentDetection {
   }
 }
 
+/**
+ * Type for referrer objects in topLevelReferrers array
+ */
+type TopLevelReferrer = {
+  packageUrl?: any;
+  packageUrlString?: string;
+};
+
 class ComponentDetectionPackage extends Package {
   public packageUrlString: string;
 
-  constructor(packageUrl: string, public id: string, public isDevelopmentDependency: boolean, public topLevelReferrers: [],
-    public locationsFoundAt: [], public containerDetailIds: [], public containerLayerIds: []) {
+  constructor(packageUrl: string, public id: string, public isDevelopmentDependency: boolean, public topLevelReferrers: TopLevelReferrer[],
+    public locationsFoundAt: string[], public containerDetailIds: string[], public containerLayerIds: string[]) {
     super(packageUrl);
     this.packageUrlString = packageUrl;
   }
