@@ -119,7 +119,12 @@ export default class ComponentDetection {
   public async getManifestsFromResults(file: string, path: string): Promise<Manifest[] | undefined> {
     console.debug(`Reading results from ${file}`);
     const results = await fs.readFileSync(file, 'utf8');
-    const json: any = JSON.parse(results);
+    let json: any;
+    try {
+      json = JSON.parse(results);
+    } catch (err: any) {
+      throw new Error(`Failed to parse JSON results from component-detection output file "${file}": ${err instanceof Error ? err.message : String(err)}`);
+    }
 
     let dependencyGraphs: DependencyGraphs = this.normalizeDependencyGraphPaths(json.dependencyGraphs, path);
 
