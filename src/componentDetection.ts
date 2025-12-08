@@ -272,9 +272,7 @@ export default class ComponentDetection {
       if (packageUrlJson.Version) {
         packageUrl += `@${packageUrlJson.Version}`;
       }
-      if (typeof packageUrlJson.Qualifiers === "object"
-        && packageUrlJson.Qualifiers !== null
-        && Object.keys(packageUrlJson.Qualifiers).length > 0) {
+      if (packageUrlJson.Qualifiers && Object.keys(packageUrlJson.Qualifiers).length > 0) {
         const qualifierString = Object.entries(packageUrlJson.Qualifiers)
           .map(([key, value]) => `${key}=${value}`)
           .join("&");
