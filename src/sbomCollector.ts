@@ -591,42 +591,48 @@ export class SbomCollector {
     const queries: ParsedQuery[] = purls.map(parseQuery).filter((q): q is ParsedQuery => !!q);
     const results = new Map<string, { purl: string; reason: string }[]>();
     if (!queries.length) return results;
-    const applyQueries = (candidatePurls: string[], queries: ParsedQuery[], found: Map<string, string>, branchTag?: string, fallbackVersion?: string) => {
-      const unique = Array.from(new Set(candidatePurls));
-      for (const p of unique) {
-        const pLower = p.toLowerCase();
-        const outKey = branchTag ? `${p}@${branchTag}` : p;
-        for (const q of queries) {
-          if (q.isPrefixWildcard) {
-            const prefix = q.lower.slice(0, -1);
-            if (pLower.startsWith(prefix)) { if (!found.has(outKey)) found.set(outKey, q.raw); }
-            continue;
-          }
-          if (q.versionConstraint && q.type && q.name) {
-            if (!pLower.startsWith("pkg:")) continue;
-            const body = p.slice(4);
-            const atIdx = body.indexOf("@");
-            const main = atIdx >= 0 ? body.slice(0, atIdx) : body;
-            const ver = atIdx >= 0 ? body.slice(atIdx + 1) : fallbackVersion;
-            const slashIdx = main.indexOf("/");
-            if (slashIdx < 0) continue;
-            const pType = main.slice(0, slashIdx).toLowerCase();
-            const pName = main.slice(slashIdx + 1);
-            if (pType === q.type && pName.toLowerCase() === q.name.toLowerCase() && ver) {
-              try {
-                const coerced = semver.coerce(ver)?.version || ver;
-                if (semver.valid(coerced) && semver.satisfies(coerced, q.versionConstraint, { includePrerelease: true })) {
-                  if (!found.has(outKey)) found.set(outKey, q.raw);
-                }
-              } catch { /* ignore */ }
-            }
-          } else if (q.exact) {
-            if (pLower === q.exact) { if (!found.has(outKey)) found.set(outKey, q.raw); }
-          }
-        }
+// Move applyQueries to module scope
+function applyQueries(
+  candidatePurls: string[],
+  queries: ParsedQuery[],
+  found: Map<string, string>,
+  branchTag?: string,
+  fallbackVersion?: string
+) {
+  const unique = Array.from(new Set(candidatePurls));
+  for (const p of unique) {
+    const pLower = p.toLowerCase();
+    const outKey = branchTag ? `${p}@${branchTag}` : p;
+    for (const q of queries) {
+      if (q.isPrefixWildcard) {
+        const prefix = q.lower.slice(0, -1);
+        if (pLower.startsWith(prefix)) { if (!found.has(outKey)) found.set(outKey, q.raw); }
+        continue;
       }
-    };
-
+      if (q.versionConstraint && q.type && q.name) {
+        if (!pLower.startsWith("pkg:")) continue;
+        const body = p.slice(4);
+        const atIdx = body.indexOf("@");
+        const main = atIdx >= 0 ? body.slice(0, atIdx) : body;
+        const ver = atIdx >= 0 ? body.slice(atIdx + 1) : fallbackVersion;
+        const slashIdx = main.indexOf("/");
+        if (slashIdx < 0) continue;
+        const pType = main.slice(0, slashIdx).toLowerCase();
+        const pName = main.slice(slashIdx + 1);
+        if (pType === q.type && pName.toLowerCase() === q.name.toLowerCase() && ver) {
+          try {
+            const coerced = semver.coerce(ver)?.version || ver;
+            if (semver.valid(coerced) && semver.satisfies(coerced, q.versionConstraint, { includePrerelease: true })) {
+              if (!found.has(outKey)) found.set(outKey, q.raw);
+            }
+          } catch { /* ignore */ }
+        }
+      } else if (q.exact) {
+        if (pLower === q.exact) { if (!found.has(outKey)) found.set(outKey, q.raw); }
+      }
+    }
+  }
+}
     for (const repoSbom of this.sboms) {
       if (repoSbom.error) continue;
       interface ExtRef { referenceType: string; referenceLocator: string }
