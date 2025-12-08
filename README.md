@@ -195,6 +195,7 @@ Offline match with already-cached malware advisories (no network calls):
 
 ```bash
 npm run start -- --sbom-cache sboms --malware-cache malware-cache --match-malware
+```
 
 Malware-only advisory sync (no SBOM cache required):
 
