@@ -546,7 +546,7 @@ export class SbomCollector {
       const status = (e as { status?: number })?.status;
       let reason = e instanceof Error ? e.message : String(e);
       if (status === 404) {
-        reason = "Dependency review unavailable (missing snapshot or feature disabled)";
+        reason = "Dependency review unavailable (missing snapshot, feature disabled, or repo not found)";
         // Optional retry path: submit snapshot then retry once
         if (this.opts.submitOnMissingSnapshot) {
           console.log(chalk.blue(`Attempting to submit component snapshot for ${org}/${repo} branch ${head} before retrying dependency review diff...`));
@@ -555,7 +555,7 @@ export class SbomCollector {
             if (ok) {
               // Delay after snapshot submission to allow GitHub to ingest and process the snapshot
               // before retrying the dependency review API. This helps avoid 404 errors on retry.
-              console.log(chalk.blue(`Snapshot submission attempted; waiting ${this.opts.retryIngestionDelayMs / 1000} seconds before retrying dependency review diff for ${org}/${repo} ${base}...${head}...`));
+              console.debug(chalk.blue(`Snapshot submission attempted; waiting ${this.opts.retryIngestionDelayMs / 1000} seconds before retrying dependency review diff for ${org}/${repo} ${base}...${head}...`));
               await new Promise(r => setTimeout(r, this.opts.retryIngestionDelayMs));
               return await this.fetchDependencyReviewDiff(org, repo, base, head, retries - 1, latestCommit);
             }
