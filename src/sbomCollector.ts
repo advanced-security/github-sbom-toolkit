@@ -194,7 +194,6 @@ export class SbomCollector {
       totalRepos = 1;
       const [org, repoName] = this.opts.repo.split("/");
       orgRepoMap[org] = [await this.getRepo(org, repoName)];
-      this.summary.orgs = orgs;
     }
 
     this.summary.repositoryCount = totalRepos;
