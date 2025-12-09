@@ -300,6 +300,9 @@ export class SbomCollector {
 
           try {
             const branches = await this.listBranches(org, repo.name);
+
+            if (this.opts.lightDelayMs) await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
+
             const nonDefault = branches.filter(b => b.name !== sbom.defaultBranch);
             const limited = this.opts.branchLimit && this.opts.branchLimit > 0 ? nonDefault.slice(0, this.opts.branchLimit) : nonDefault;
             const branchDiffs: Map<string, BranchDependencyDiff> = new Map();
@@ -307,10 +310,14 @@ export class SbomCollector {
 
               // get the commits, compare to the stored diff info. If the latest commit is newer, then fetch diff, otherwise skip
               const latestCommit = await this.getLatestCommit(org, repo.name, b.name);
+
+              if (this.opts.lightDelayMs) await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
+              
               if (!latestCommit) {
                 console.error(chalk.red(`Failed to get latest commit for ${fullName} branch ${b.name}.`));
                 continue;
               }
+
               const existing = sbom.branchDiffs instanceof Map ? sbom.branchDiffs.get(b.name) : undefined;
               if (await this.isCommitNewer(latestCommit, existing) || this.opts.forceSubmission) {
                 console.debug(chalk.green(`Fetching branch diff for ${fullName} branch ${b.name}...`));
@@ -326,7 +333,6 @@ export class SbomCollector {
               const base = this.opts.branchDiffBase || sbom?.defaultBranch;
               if (!base) { console.error(chalk.red(`Cannot compute branch diff for ${fullName} branch ${b.name} because base branch is undefined.`)); continue; }
 
-              if (this.opts.lightDelayMs) await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
               // Optionally perform dependency submission up front for the branch
               if (this.opts.forceSubmission) {
                 try {
@@ -357,7 +363,7 @@ export class SbomCollector {
         if (sbom && !sbom.error && this.opts.loadFromDir && this.opts.syncSboms && this.opts.loadFromDir.length) {
           try { writeOne(sbom, { outDir: this.opts.loadFromDir }); } catch { /* ignore write errors */ }
         }
-        
+
         if (sbom) {
           newSboms.push(sbom);
         }
@@ -382,6 +388,9 @@ export class SbomCollector {
     if (!this.octokit) throw new Error("No Octokit instance");
     try {
       const resp = await this.octokit.request("GET /repos/{owner}/{repo}/commits", { owner: org, repo, sha: branch });
+
+      await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
+
       const commitSha = resp.data?.[0]?.sha;
       const commitDate = resp.data?.[0]?.commit?.author?.date;
       return { sha: commitSha, commitDate };
@@ -434,6 +443,9 @@ export class SbomCollector {
     while (!done) {
       try {
         const resp = await this.octokit.request("GET /orgs/{org}/repos", { org, per_page, page, type: this.opts.includePrivate ? "all" : "public" });
+
+        await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
+
         const items = resp.data as Array<{ name: string; pushed_at?: string; updated_at?: string; default_branch?: string }>;
         for (const r of items) {
           repos.push({ name: r.name, pushed_at: r.pushed_at, updated_at: r.updated_at, default_branch: r.default_branch });
@@ -453,6 +465,9 @@ export class SbomCollector {
 
     try {
       const resp = await this.octokit.request("GET /repos/{owner}/{repo}", { owner: org, repo });
+
+      await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
+
       const data = resp.data as { name: string; pushed_at?: string; updated_at?: string; default_branch?: string };
       return data;
     } catch (e) {
@@ -466,7 +481,6 @@ export class SbomCollector {
 
     const fullName = `${org}/${repo}`;
     try {
-      // TODO: Ensure dependency graph is enabled before requesting SBOM
       const resp = await this.octokit.request("GET /repos/{owner}/{repo}/dependency-graph/sbom", { owner: org, repo, headers: { Accept: "application/vnd.github+json" } });
       const sbomWrapper = resp.data as { sbom?: Sbom };
       const packages: SbomPackage[] = sbomWrapper?.sbom?.packages ?? [];
@@ -505,6 +519,8 @@ export class SbomCollector {
     while (!done) {
       try {
         const resp = await this.octokit.request("GET /repos/{owner}/{repo}/branches", { owner: org, repo, per_page, page });
+        await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
+
         const data = resp.data as Array<{ name: string; protected?: boolean; commit?: { sha?: string } }>;
         branches.push(...data);
         if (data.length < per_page) done = true; else page++;
@@ -523,6 +539,8 @@ export class SbomCollector {
     try {
       const basehead = `${base}...${head}`;
       const resp = await this.octokit.request("GET /repos/{owner}/{repo}/dependency-graph/compare/{basehead}", { owner: org, repo, basehead, headers: { Accept: "application/vnd.github+json" } });
+      await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
+
       // Response shape includes change_set array (per docs). We normalize to DependencyReviewPackageChange[]
       const raw = resp.data;
 

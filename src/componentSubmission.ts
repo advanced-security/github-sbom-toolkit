@@ -23,10 +23,14 @@ export interface SubmitOpts {
     quiet?: boolean;
     languages?: string[];
     componentDetectionBinPath?: string; // optional path to component-detection executable
+    lightDelayMs?: number;
 }
 
-export async function getLanguageIntersection(octokit: Octokit, owner: string, repo: string, languages: string[] | undefined, quiet: boolean = false): Promise<string[]> {
+export async function getLanguageIntersection(octokit: Octokit, owner: string, repo: string, languages: string[] | undefined, quiet: boolean = false, lightDelayMs: number = 0): Promise<string[]> {
     const langResp = await octokit.request('GET /repos/{owner}/{repo}/languages', { owner, repo });
+
+    await new Promise(r => setTimeout(r, lightDelayMs));
+
     const repoLangs = Object.keys(langResp.data || {});
     const wanted = languages;
     const intersect = wanted ? repoLangs.filter(l => wanted.some(w => w.toLowerCase() === l.toLowerCase())) : repoLangs;
@@ -37,7 +41,7 @@ export async function getLanguageIntersection(octokit: Octokit, owner: string, r
     return intersect;
 }
 
-export async function sparseCheckout(owner: string, repo: string, branch: string, destDir: string, intersect: string[], baseUrl?: string) {
+export async function sparseCheckout(owner: string, repo: string, branch: string, destDir: string, intersect: string[], baseUrl?: string, lightDelayMs?: number) {
     const cwd = destDir;
     const repoUrl = (baseUrl && baseUrl.includes('api/v3'))
         ? baseUrl.replace(/\/api\/v3$/, '') + `/${owner}/${repo}.git`
@@ -51,6 +55,8 @@ export async function sparseCheckout(owner: string, repo: string, branch: string
     fs.writeFileSync(path.join(cwd, '.git', 'info', 'sparse-checkout'), patterns.join('\n') + '\n', 'utf8');
     await execGit(['fetch', '--depth=1', 'origin', branch], { cwd });
     await execGit(['checkout', 'FETCH_HEAD'], { cwd });
+
+    await new Promise(r => setTimeout(r, lightDelayMs));
 
     const { stdout: shaOut } = await execGit(['rev-parse', 'HEAD'], { cwd: destDir });
     const sha = shaOut.trim();
@@ -66,7 +72,7 @@ export async function submitSnapshotIfPossible(opts: SubmitOpts): Promise<boolea
     const tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'cd-submission-'));
 
     try {
-        const intersect = await getLanguageIntersection(opts.octokit, opts.owner, opts.repo, opts.languages);
+        const intersect = await getLanguageIntersection(opts.octokit, opts.owner, opts.repo, opts.languages, opts.quiet, opts.lightDelayMs);
         // Create temp dir and sparse checkout only manifest files according to selected languages
         if (!intersect.length) {
             // No matching languages, skip submission
@@ -74,14 +80,14 @@ export async function submitSnapshotIfPossible(opts: SubmitOpts): Promise<boolea
         }
         console.debug(chalk.green(`Sparse checkout into ${tmp} for languages: ${intersect.join(', ')}`));
 
-        const sha = await sparseCheckout(opts.owner, opts.repo, opts.branch, tmp, intersect, opts.baseUrl);
+        const sha = await sparseCheckout(opts.owner, opts.repo, opts.branch, tmp, intersect, opts.baseUrl, opts.lightDelayMs);
 
         // Run the ComponentDetection module to detect components and submit snapshot
         if (!sha) {
             if (!opts.quiet) console.error(chalk.red(`Failed to determine SHA for ${opts.owner}/${opts.repo} on branch ${opts.branch}`));
             return false;
         }
-        return await run(opts.octokit, tmp, opts.owner, opts.repo, sha, opts.branch, opts.componentDetectionBinPath);
+        return await runComponentDetectionAndSubmit(opts.octokit, tmp, opts.owner, opts.repo, sha, opts.branch, opts.componentDetectionBinPath);
 
     } catch (e) {
         if (!opts.quiet) console.error(chalk.red(`Component Detection failed: ${(e as Error).message}`));
@@ -150,7 +156,7 @@ async function execGit(args: string[], opts: { cwd: string, quiet?: boolean }): 
     });
 }
 
-export async function run(octokit: Octokit, tmpDir: string, owner: string, repo: string, sha: string, ref: string, componentDetectionBinPath?: string): Promise<boolean> {
+export async function runComponentDetectionAndSubmit(octokit: Octokit, tmpDir: string, owner: string, repo: string, sha: string, ref: string, componentDetectionBinPath?: string): Promise<boolean> {
 
     const componentDetection = new ComponentDetection(octokit, '', componentDetectionBinPath);
 
