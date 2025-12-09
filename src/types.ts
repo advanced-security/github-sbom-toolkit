@@ -112,6 +112,7 @@ export interface DependencyReviewPackageChange {
   changeType: string; // added | removed | updated
   name?: string; // package name
   ecosystem?: string; // e.g. npm, maven, pip
+  namespace?: string; // e.g. groupId for maven
   packageURL?: string; // raw package URL (may be purl-like)
   purl?: string; // normalized purl (if derivable)
   license?: string;
