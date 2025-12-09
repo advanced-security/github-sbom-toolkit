@@ -113,8 +113,7 @@ export interface DependencyReviewPackageChange {
   name?: string; // package name
   ecosystem?: string; // e.g. npm, maven, pip
   namespace?: string; // e.g. groupId for maven
-  packageURL?: string; // raw package URL (may be purl-like)
-  purl?: string; // normalized purl (if derivable)
+  packageURL?: string; // raw package URL
   license?: string;
   manifest?: string; // manifest path
   scope?: string; // e.g. runtime, development
