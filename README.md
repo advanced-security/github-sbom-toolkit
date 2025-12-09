@@ -32,7 +32,7 @@ Supports human-readable, JSON, CSV and SARIF output. SARIF alerts can be uploade
     - includes Code Scanning upload†
 - Works with GitHub.com, GitHub Enterprise Server, GitHub Enterprise Managed Users and GitHub Enterprise Cloud with Data Residency (custom base URL)
 
-† GitHub Advanced Security or GitHub Code Security required for this feature
+† GitHub Advanced Security/GitHub Code Security required for this feature
 
 ## Usage
 
@@ -388,12 +388,12 @@ Then type one PURL query per line. Entering a blank line or using Ctrl+C on a bl
 | `--token <token>` | GitHub token; required for `--sync-sboms`, `--sync-malware`, and `--upload-sarif` (or use `GITHUB_TOKEN`) |
 | `--enterprise <slug>` | Collect across all orgs in an Enterprise (mutually exclusive with `--org`/`--repo` when syncing) |
 | `--org <login>` | Single organization scope (mutually exclusive with `--enterprise`/`--repo` when syncing) |
-| `--repo <name>` | Single repository scope (mutually exclusive with `--enterprise`/`--org` when syncing) |
+| `--repo <name>` | Single repository scope in the form `owner/name` (mutually exclusive with `--enterprise`/`--org` when syncing) |
 | `--base-url <url>` | GitHub Enterprise Server REST base URL (e.g. `https://ghe.example.com/api/v3`) |
 | `--concurrency <n>` | Parallel SBOM fetches (default 5) |
 | `--sbom-delay <ms>` | Delay between SBOM fetch requests (default 3000) |
 | `--light-delay <ms>` | Delay between lightweight metadata requests (default 100) |
-| `--sbom-cache <dir>` | Directory to read/write per‑repo SBOM JSON; required for offline mode |
+| `--sbom-cache <dir>` | Directory to read/write per‑repo SBOM JSON; required for SBOM syncing and offline use |
 | `--sync-sboms` | Perform API calls to collect SBOMs; without it the CLI runs offline using `--sbom-cache` |
 | `--progress` | Show a progress bar during SBOM collection |
 | `--suppress-secondary-rate-limit-logs` | Suppress secondary rate limit warning logs (useful with `--progress`) |
@@ -465,7 +465,7 @@ npm run start -- --sbom-cache fixtures/sboms --malware-cache fixtures/malware-ca
 
 Standard & secondary rate limits trigger an automatic retry (up to 2 times).
 
-You can tune concurrency and increase the delay to reduce the chance of hitting rate limits.
+You can tune concurrency and increase the various delays to reduce the chance of hitting rate limits, if you find that you have hit rate limits.
 
 Each time a secondary rate limit is hit, the delay between fetching SBOMs is increased by 10%, to provide a way to adaptively respond to that rate limit.
 
