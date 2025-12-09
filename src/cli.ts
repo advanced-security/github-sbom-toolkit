@@ -5,7 +5,10 @@ import chalk from "chalk";
 import { SbomCollector } from "./sbomCollector.js";
 import inquirer from "inquirer"; // still used elsewhere if needed
 import readline from "readline";
-const { MalwareAdvisorySync } = await import("./malwareAdvisories.js");
+import { CollectionSummary, RepositorySbom } from "./types.js";
+import { MalwareAdvisorySync } from "./malwareAdvisories.js";
+import { MalwareMatch } from "./malwareMatcher.js";
+import fs from "fs";
 
 async function main() {
   const argv = await yargs(hideBin(process.argv))
@@ -13,7 +16,9 @@ async function main() {
     .option("token", { type: "string", describe: "GitHub token with repo + security_events scope" })
     .option("enterprise", { type: "string", describe: "Enterprise slug (mutually exclusive with --org)" })
     .option("org", { type: "string", describe: "Single organization login" })
+    .option("repo", { type: "string", describe: "Single repository name" })
     .option("base-url", { type: "string", describe: "GitHub Enterprise Server base URL, e.g. https://github.mycompany.com/api/v3" })
+    .option("ghes", { type: "boolean", default: false, describe: "Indicates that the provided base URL is for GitHub Enterprise Server" })
     .option("concurrency", { type: "number", default: 5 })
     .option("sbom-delay", { type: "number", default: 3000, describe: "Delay (ms) between SBOM fetch requests" })
     .option("light-delay", { type: "number", default: 100, describe: "Delay (ms) between lightweight metadata requests (org/repo listing, commit head checks)" })
@@ -25,7 +30,7 @@ async function main() {
     .option("quiet", { type: "boolean", default: false, describe: "Suppress all non-error output (does not suppress progress bar or JSON)" })
     .option("interactive", { type: "boolean", default: false, describe: "Enter interactive PURL search mode after collection" })
     .option("sync-malware", { type: "boolean", default: false, describe: "Sync malware advisories (MALWARE classification) to local cache" })
-    .option("malware-cache", { type: "string", default: "malware-cache", describe: "Directory to store malware advisory cache" })
+    .option("malware-cache", { type: "string", describe: "Directory to store malware advisory cache" })
     .option("malware-since", { type: "string", describe: "Override last sync timestamp (ISO) for malware advisory incremental sync" })
     .option("ca-bundle", { type: "string", describe: "Path to PEM file with additional CA certificate(s) (self-signed/internal)" })
     .option("match-malware", { type: "boolean", default: false, describe: "After sync/load, match SBOM packages against malware advisories" })
@@ -39,13 +44,27 @@ async function main() {
     .option("csv", { type: "boolean", describe: "Emit results (search + malware matches) as CSV" })
     .option("ignore-file", { type: "string", describe: "Path to YAML ignore file (advisories, purls, scoped ignores)" })
     .option("ignore-unbounded-malware", { type: "boolean", default: false, describe: "Ignore malware advisories whose vulnerable range covers all versions (e.g. '*', '>=0')" })
+    .option("branch-scan", { type: "boolean", default: false, describe: "Fetch SBOM diffs for non-default branches (limited by --branch-limit)" })
+    .option("branch-limit", { type: "number", default: undefined, describe: "Limit number of non-default branches to scan per repository" })
+    .option("diff-base", { type: "string", describe: "Override base branch for dependency review diffs (defaults to default branch)" })
+    .option("submit-on-missing-snapshot", { type: "boolean", default: false, describe: "When dependency review diff returns 404 (missing snapshot), run Component Detection to submit a snapshot, then retry." })
+    .option("submit-languages", { type: "array", describe: "Limit snapshot submission to these languages (e.g., JavaScript,TypeScript,Python,Maven)." })
+    .option("component-detection-bin", { type: "string", describe: "Path to a local component-detection executable to use for snapshot submission (skips download)." })
+    .option("force-submission", { type: "boolean", default: false, describe: "Always run Dependency Submission for scanned branches before fetching diffs." })
+    .option("snapshot-ingestion-delay", { type: "number", default: 1500, describe: "Delay (ms) after snapshot submission to allow ingestion before dependency review (default: 1500ms)" })
+    .option("retry-ingestion-delay", { type: "number", default: 3000, describe: "Delay (ms) after snapshot submission before retrying dependency review on 404 (default: 3000ms)" })
+    .option("debug", { type: "boolean", default: false, describe: "Enable debug logging" })
     .check(args => {
       const syncing = !!args.syncSboms;
       if (syncing) {
-        if (!args.enterprise && !args.org) throw new Error("Provide --enterprise or --org with --sync-sboms");
+        if (!args.enterprise && !args.org && !args.repo) throw new Error("Provide --enterprise, --org or --repo with --sync-sboms");
         if (args.enterprise && args.org) throw new Error("Specify only one of --enterprise or --org");
+        if (args.repo && (args.enterprise || args.org)) throw new Error("Specify only one of --enterprise, --org, or --repo");
+        if (args.repo && !(args.repo as string).includes("/")) throw new Error("--repo must be in the format owner/repo");
+        if (syncing && !args.sbomCache) throw new Error("--sync-sboms requires --sbom-cache to write updated SBOMs to disk");
       } else {
-        if (!args.sbomCache) throw new Error("Offline mode requires --sbom-cache (omit --sync-sboms)");
+        const malwareOnly = !!args["sync-malware"] && !args.sbomCache && !args.purl && !args["purl-file"] && !args["match-malware"] && !args.uploadSarif && !args.interactive;
+        if (!malwareOnly && !args.sbomCache) throw new Error("Offline mode requires --sbom-cache unless running --sync-malware by itself");
       }
       // If --cli is specified in combination with JSON or CSV, require an output file to avoid mixed stdout streams.
       if (args.cli && !args.outputFile && (args.json || args.csv)) {
@@ -72,6 +91,14 @@ async function main() {
     .help()
     .parseAsync();
 
+  const debug = argv.debug as boolean;
+
+  if (debug) {
+    console.debug(chalk.blue("Debug logging enabled"));
+  } else {
+    console.debug = () => { };
+  }
+
   const token = argv.token as string | undefined || process.env.GITHUB_TOKEN;
 
   // Require a token for any network operation (syncing SBOMs, malware advisories, or SARIF upload)
@@ -88,11 +115,18 @@ async function main() {
   const wantCsv = !!argv.csv;
   const hasOutputFile = !!argv.outputFile;
   const wantCli = !!argv.cli && hasOutputFile; // only allow CLI alongside machine output when writing file
-  const collector = new SbomCollector({
+
+  let sboms: RepositorySbom[] = [];
+  let summary: CollectionSummary | undefined;
+
+  const needCollector = !!argv.syncSboms || !!argv.sbomCache || !!argv.purl || !!argv["purl-file"] || !!argv["match-malware"] || !!argv.uploadSarif || !!argv.interactive;
+  const collector = needCollector ? new SbomCollector({
     token: token,
     enterprise: argv.enterprise as string | undefined,
     org: argv.org as string | undefined,
+    repo: argv.repo as string | undefined,
     baseUrl: argv["base-url"] as string | undefined,
+    ghes: argv.ghes as boolean | undefined,
     concurrency: argv.concurrency as number,
     delayMsBetweenRepos: argv["sbom-delay"] as number,
     lightDelayMs: argv["light-delay"] as number,
@@ -102,30 +136,42 @@ async function main() {
     suppressSecondaryRateLimitLogs: argv.suppressSecondaryRateLimitLogs as boolean,
     quiet,
     caBundlePath: argv["ca-bundle"] as string | undefined,
-  });
+    includeBranches: argv["branch-scan"] as boolean,
+    branchLimit: argv["branch-limit"] as number | undefined,
+    branchDiffBase: argv["diff-base"] as string | undefined,
+    submitOnMissingSnapshot: argv["submit-on-missing-snapshot"] as boolean,
+    forceSubmission: argv["force-submission"] as boolean,
+    submitLanguages: (argv["submit-languages"] as string[] | undefined) || undefined,
+    componentDetectionBinPath: argv["component-detection-bin"] as string | undefined,
+    snapshotIngestionDelayMs: argv["snapshot-ingestion-delay"] as number | undefined,
+    retryIngestionDelayMs: argv["retry-ingestion-delay"] as number | undefined,
+  }) : undefined;
 
-  if (!quiet) process.stderr.write(chalk.cyan(offline ? "Loading SBOMs from cache..." : "Collecting SBOMs from cache & GitHub...") + "\n");
-  const sboms = await collector.collect();
-  const summary = collector.getSummary();
-  if (!quiet) process.stderr.write(chalk.green(`Done. Success: ${summary.successCount} / ${summary.repositoryCount}. Failed: ${summary.failedCount}. Cached: ${summary.skippedCount}`) + "\n");
+  if (collector && (argv.sbomCache || argv.syncSboms)) {
+    if (!quiet) process.stderr.write(chalk.cyan(offline ? "Loading SBOMs from cache..." : "Collecting SBOMs from cache & GitHub...") + "\n");
+    sboms = await collector.collect();
+    summary = collector.getSummary();
+    if (!quiet) process.stderr.write(chalk.green(`Done. Success: ${summary.successCount} / ${summary.repositoryCount}. Failed: ${summary.failedCount}. Cached: ${summary.skippedCount}`) + "\n");
+  }
 
   const mas = new MalwareAdvisorySync({
     token: token!,
     baseUrl: argv["base-url"] ? (argv["base-url"] as string).replace(/\/v3$/, "/graphql") : undefined,
     cacheDir: argv["malware-cache"] as string | undefined,
     since: argv["malware-since"] as string | undefined,
-    caBundlePath: argv["ca-bundle"] as string | undefined
+    caBundlePath: argv["ca-bundle"] as string | undefined,
+    quiet
   });
 
-  if (argv["sync-malware"]) {
-
+  if (argv.syncMalware) {
     if (!quiet) process.stderr.write(chalk.cyan("Syncing malware advisories from GitHub Advisory Database...") + "\n");
 
     const { added, updated, total } = await mas.sync();
     if (!quiet) process.stderr.write(chalk.green(`Malware advisories sync complete. Added: ${added}, Updated: ${updated}, Total cached: ${total}`) + "\n");
   }
 
-  let malwareMatches: import("./malwareMatcher.js").MalwareMatch[] | undefined;
+  let malwareMatches: MalwareMatch[] = [];
+
   if (argv["match-malware"]) {
     const { matchMalware, buildSarifPerRepo, writeSarifFiles, uploadSarifPerRepo } = await import("./malwareMatcher.js");
     malwareMatches = matchMalware(mas.getAdvisories(), sboms, { advisoryDateCutoff: argv["malware-cutoff"] as string | undefined });
@@ -166,7 +212,8 @@ async function main() {
       const showMalwareCli = (!wantJson && !wantCsv) || wantCli; // show only in pure CLI or combined mode
       if (showMalwareCli && !quiet) {
         for (const m of malwareMatches) {
-          process.stdout.write(`${m.repo} :: ${m.purl} => ${m.advisoryGhsaId} (${m.vulnerableVersionRange ?? "(no range)"}) {advisory: ${m.reason}} ${m.advisoryPermalink}\n`);
+          const branchInfo = m.branch ? ` [branch: ${m.branch}]` : "";
+          process.stdout.write(`${m.repo} :: ${m.purl} => ${m.advisoryGhsaId} (${m.vulnerableVersionRange ?? "(no range)"}){advisory: ${m.reason}}${branchInfo} ${m.advisoryPermalink}\n`);
         }
       }
       if (argv.sarifDir) {
@@ -183,10 +230,6 @@ async function main() {
         }
       }
     }
-  }
-  // Incremental write now handled inside collector; retain legacy behavior only if user wants to force a re-write
-  if (!quiet && argv.syncSboms && argv["sbom-cache"] && summary.repositoryCount === summary.skippedCount) {
-    process.stderr.write(chalk.blue("All repositories reused from cache (no new SBOM writes).") + "\n");
   }
 
   const runSearchCli = (purls: string[], results: Map<string, { purl: string; reason: string }[]>) => {
@@ -219,16 +262,17 @@ async function main() {
   }
   const combinedPurlsRaw = [...(argv.purl as string[] ?? []), ...filePurls];
   const combinedPurls = combinedPurlsRaw.map(p => p.startsWith("pkg:") ? p : `pkg:${p}`);
+
   let searchMap: Map<string, { purl: string; reason: string }[]> | undefined;
-  if (combinedPurls.length) {
+  if (combinedPurls.length && collector) {
     searchMap = collector.searchByPurlsWithReasons(combinedPurls);
   }
+
   if (wantJson) {
     const jsonSearch = Array.from((searchMap || new Map()).entries()).map(([repo, entries]) => ({ repo, matches: entries }));
     if (hasOutputFile) {
       try {
-        const fs = await import("fs");
-        let existing: { search?: unknown; malwareMatches?: import("./malwareMatcher.js").MalwareMatch[] } = {};
+        let existing: { search?: unknown; malwareMatches?: MalwareMatch[] } = {};
         if (fs.existsSync(argv.outputFile as string)) {
           try { existing = JSON.parse(fs.readFileSync(argv.outputFile as string, "utf8")); } catch { existing = {}; }
         }
@@ -256,14 +300,14 @@ async function main() {
         for (const { purl, reason } of entries) searchRows.push({ repo, purl, reason });
       }
     }
-    const malwareRows: Array<{ repo: string; purl: string; advisory: string; range: string | null; updatedAt: string }> = [];
-    if (malwareMatches) {
+    const malwareRows: Array<{ repo: string; purl: string; advisory: string; range: string | null; updatedAt: string; branch: string | undefined }> = [];
+    if (malwareMatches.length) {
       for (const m of malwareMatches) {
-        malwareRows.push({ repo: m.repo, purl: m.purl, advisory: m.advisoryGhsaId, range: m.vulnerableVersionRange, updatedAt: m.advisoryUpdatedAt });
+        malwareRows.push({ repo: m.repo, purl: m.purl, advisory: m.advisoryGhsaId, range: m.vulnerableVersionRange, updatedAt: m.advisoryUpdatedAt, branch: m.branch });
       }
     }
     // CSV columns: type,repo,purl,reason_or_advisory,range,updatedAt
-    const header = ["type", "repo", "purl", "reason_or_advisory", "range", "updatedAt"];
+    const header = ["type", "repo", "purl", "reason_or_advisory", "range", "updatedAt", "branch"];
     const sanitize = (val: unknown): string => {
       if (val === null || val === undefined) return "";
       let s = String(val);
@@ -291,7 +335,8 @@ async function main() {
         sanitize(r.purl),
         sanitize(r.advisory),
         sanitize(r.range ?? ""),
-        sanitize(r.updatedAt)
+        sanitize(r.updatedAt),
+        sanitize(r.branch ?? "")
       ].join(","));
     }
     const csvPayload = lines.join("\n") + "\n";
@@ -369,6 +414,11 @@ async function main() {
         }
         const list = trimmed.split(/[\s,]+/).filter(Boolean);
         try {
+          if (!collector) {
+            console.error(chalk.red("Interactive search requires SBOMs; provide --sbom-cache or run with --sync-sboms."));
+            rl.prompt();
+            return;
+          }
           const map = collector.searchByPurlsWithReasons(list.map(p => p.startsWith("pkg:") ? p : `pkg:${p}`));
           runSearchCli(list, map);
         } catch (e) {
@@ -388,8 +438,12 @@ async function main() {
           { name: "purl", message: "Enter a PURL (blank to exit)", type: "input" }
         ]);
         if (!ans.purl) break;
-  const map = collector.searchByPurlsWithReasons([ans.purl.startsWith("pkg:") ? ans.purl : `pkg:${ans.purl}`]);
-  runSearchCli([ans.purl], map);
+        if (!collector) {
+          console.error(chalk.red("Interactive search requires SBOMs; provide --sbom-cache or run with --sync-sboms."));
+          continue;
+        }
+        const map = collector.searchByPurlsWithReasons([ans.purl.startsWith("pkg:") ? ans.purl : `pkg:${ans.purl}`]);
+        runSearchCli([ans.purl], map);
       }
     }
   }

@@ -16,6 +16,7 @@ Supports human-readable, JSON, CSV and SARIF output. SARIF alerts can be uploade
   - Optional progress bar while fetching SBOMs
   - Option to suppress secondary rate limit warnings, and full quiet mode to suppress informative messages
   - Adaptive backoff: each secondary rate limit hit increases the SBOM fetch delay by 10% to reduce future throttling
+- Optional branch scanning†: fetch SBOM diffs with Dependency Review for non-default branches and submit missing dependency snapshots if needed with Component Detection + Dependency Submission
 - Offline caching of SBOMs and security advisories with incremental updates
 - Matching:
   - Version-aware matching of SBOM packages against malware advisories
@@ -27,8 +28,11 @@ Supports human-readable, JSON, CSV and SARIF output. SARIF alerts can be uploade
 - Output:
   - Human-readable console output
   - JSON or CSV output (to stdout or file) with both search and malware matches
-  - Optional SARIF 2.1.0 output per repository for malware matches with optional Code Scanning upload
+  - Optional SARIF 2.1.0 output per repository for malware matches
+    - includes Code Scanning upload†
 - Works with GitHub.com, GitHub Enterprise Server, GitHub Enterprise Managed Users and GitHub Enterprise Cloud with Data Residency (custom base URL)
+
+† GitHub Advanced Security/GitHub Code Security required for this feature
 
 ## Usage
 
@@ -54,6 +58,76 @@ Using GitHub Enterprise Server:
 ```bash
 npm run start -- --sync-sboms --enterprise ent --base-url https://github.internal/api/v3 --sbom-cache sboms --token $GHES_TOKEN
 ```
+
+### 🔀 Branch Scanning & Dependency Review
+
+Enable branch SBOM collection and dependency diffs with `--branch-scan`.
+
+Flags:
+
+```bash
+--branch-scan              # Fetch SBOMs for non-default branches
+--branch-limit <n>          # Max number of non-default branches per repo (default 10)
+--diff-base <branch>        # Override base branch for diffs (default: repository default)
+```
+
+Example: scan first 5 feature branches and diff them against `main`:
+
+```bash
+npm run start -- --sync-sboms --org my-org \
+  --sbom-cache sboms --branch-scan --branch-limit 5 \
+  --diff-base main --token $GITHUB_TOKEN
+```
+
+Search results will include branch matches: package PURLs annotated with `@branch` inside the match list (e.g. `pkg:npm/react@18.3.0@feature-x`). Dependency Review additions / updates are also searched; only added/updated head-side packages are considered.
+
+If a branch SBOM or diff retrieval fails, the error is recorded but does not stop collection for other branches or repositories.
+
+#### Handling Missing Dependency Review Snapshots
+
+If the Dependency Review API returns a 404 for a branch diff (commonly due to a missing dependency snapshot on either the base or head commit), the toolkit can optionally attempt to generate and submit a snapshot using Component Detection and Dependency Submission. This is vendored-in and forked from the public [Component Detection Dependency Submission Action](https://github.com/advanced-security/component-detection-dependency-submission-action).
+
+Enable automatic submission + retry with:
+
+```bash
+--submit-on-missing-snapshot
+```
+
+The tool will attempt to download the latest Component Detection release from GitHub Releases into the current directory, to run it, unless you provide a local binary with `--component-detection-bin`.
+
+If submission fails, the original 404 reason is retained and collection proceeds.
+
+##### Using a Local Component Detection Binary
+
+Instead of downloading the latest release automatically, you can point the toolkit at a local `component-detection` executable. This is useful if you already manage the binary or need a custom build.
+
+Pass the path via `--component-detection-bin` and optionally limit languages to reduce sparse checkout size:
+
+```bash
+npm run start -- \
+  --sync-sboms --org my-org --sbom-cache sboms \
+  --branch-scan --submit-on-missing-snapshot \
+  --submit-languages JavaScript,TypeScript \
+  --component-detection-bin /usr/local/bin/component-detection
+```
+
+On MacOS, you may find that system protection prevents running a downloaded binary. You can [check out the .NET code](https://github.com/microsoft/component-detection/) and run it via a wrapper script such as:
+
+```bash
+#!/bin/bash
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+cd "$SCRIPT_DIR" || exit 1
+
+dotnet run --project "./src/Microsoft.ComponentDetection/Microsoft.ComponentDetection.csproj" "$@"
+```
+
+Notes:
+
+- Providing `--component-detection-bin` skips any download logic and uses your binary directly.
+- Snapshot submission performs a language-aware sparse checkout of common manifest/lock files (e.g., `package.json`, `requirements.txt`, `pom.xml`).
+- After submission, the toolkit waits briefly and retries the dependency review diff once.
 
 ### 🔑 Authentication
 
@@ -123,6 +197,12 @@ Offline match with already-cached malware advisories (no network calls):
 npm run start -- --sbom-cache sboms --malware-cache malware-cache --match-malware
 ```
 
+Malware-only advisory sync (no SBOM cache required):
+
+```bash
+npm run start -- --sync-malware --malware-cache malware-cache --token $GITHUB_TOKEN
+```
+
 Write malware matches (and optionally search results later) to a JSON file using `--output-file`:
 
 ```bash
@@ -130,6 +210,16 @@ npm run start -- --sbom-cache sboms --malware-cache malware-cache --match-malwar
 ```
 
 If you also perform a search in the same invocation (add `--purl` or `--purl-file`), the JSON file will contain both `malwareMatches` and `search` top-level keys.
+
+#### Advisory Rate Limit Handling
+
+Advisory sync uses GitHub GraphQL with adaptive retry/backoff to handle secondary rate limits and transient errors:
+
+- Retries on `403` secondary rate limit, `429`, and `5xx` responses.
+- Honors `Retry-After` when provided; otherwise uses exponential backoff with jitter.
+- Respects `--quiet` to suppress retry log messages.
+
+If retries are exhausted, the sync aborts gracefully and leaves previously cached advisories intact.
 
 #### Ignoring Matches
 
@@ -295,31 +385,42 @@ Then type one PURL query per line. Entering a blank line or using Ctrl+C on a bl
 
 | Arg | Purpose |
 |------|---------|
-| `--sbom-cache <dir>` | Directory holding per-repo SBOM JSON files (required for offline mode; used as write target when syncing) |
-| `--sync-sboms` | Perform API calls to (re)collect SBOMs; without it the CLI runs offline loading cached SBOMs. Requires a GitHub token |
-| `--enterprise <slug>` / `--org <login>` | Scope selection (mutually exclusive when syncing) |
-| `--purl <purl>` | Add a PURL/range/wildcard query (repeatable) |
-| `--purl-file <file>` | File with one query per line |
-| `--json` | Emit search JSON to stdout (unless overridden by `--output-file`) |
-| `--cli` | Also emit human-readable output when producing JSON (requires `--output-file`) |
-| `--output-file <file>` | Write search JSON payload to file; required when using both `--json` and `--cli` |
-| `--interactive` | Enter interactive search prompt after initial processing |
-| `--sync-malware` | Fetch & cache malware advisories (MALWARE classification). Requires a GitHub token |
-| `--match-malware` | Match current SBOM set against cached advisories |
-| `--malware-cache <dir>` | Advisory cache directory (required with malware operations) |
-| `--malware-cutoff <ISO-date>` | Ignore advisories whose publishedAt AND updatedAt are both before this date/time (e.g. `2025-09-29` or full timestamp) |
-| `--ignore-file <path>` | YAML ignore file (advisories / purls / scoped blocks) to filter malware matches before output |
-| `--ignore-unbounded-malware` | Ignore matches whose advisory vulnerable version range covers all versions (e.g. `*`, `>=0`, `0.0.0`) |
-| `--sarif-dir <dir>` | Write SARIF 2.1.0 files per repository (with malware matches) |
-| `--upload-sarif` | Upload generated SARIF to Code Scanning (requires --match-malware & --sarif-dir and a GitHub token) |
+| `--token <token>` | GitHub token; required for `--sync-sboms`, `--sync-malware`, and `--upload-sarif` (or use `GITHUB_TOKEN`) |
+| `--enterprise <slug>` | Collect across all orgs in an Enterprise (mutually exclusive with `--org`/`--repo` when syncing) |
+| `--org <login>` | Single organization scope (mutually exclusive with `--enterprise`/`--repo` when syncing) |
+| `--repo <name>` | Single repository scope in the form `owner/name` (mutually exclusive with `--enterprise`/`--org` when syncing) |
+| `--base-url <url>` | GitHub Enterprise Server REST base URL (e.g. `https://ghe.example.com/api/v3`) |
 | `--concurrency <n>` | Parallel SBOM fetches (default 5) |
-| `--sbom-delay <ms>` | Delay between SBOM fetch (dependency-graph/sbom) requests (default 5000) |
-| `--light-delay <ms>` | Delay between lightweight metadata calls (listing repos, commit head checks) (default 500) |
-| `--base-url <url>` | GitHub Enterprise Server REST base URL (ends with /api/v3) |
-| `--progress` | Show a dynamic progress bar during SBOM collection |
-| `--suppress-secondary-rate-limit-logs` | Hide secondary rate limit warning lines (automatically applied with `--progress`) |
-| `--quiet` | Suppress all non-error and non-result output (progress bar, JSON and human readable output still show) |
-| `--ca-bundle <path>` | Path to a PEM file containing one or more additional CA certificates (self‑signed / internal PKI) |
+| `--sbom-delay <ms>` | Delay between SBOM fetch requests (default 3000) |
+| `--light-delay <ms>` | Delay between lightweight metadata requests (default 100) |
+| `--sbom-cache <dir>` | Directory to read/write per‑repo SBOM JSON; required for SBOM syncing and offline use |
+| `--sync-sboms` | Perform API calls to collect SBOMs; without it the CLI runs offline using `--sbom-cache` |
+| `--progress` | Show a progress bar during SBOM collection |
+| `--suppress-secondary-rate-limit-logs` | Suppress secondary rate limit warning logs (useful with `--progress`) |
+| `--quiet` | Suppress non‑error output (progress bar and machine output still emitted) |
+| `--ca-bundle <path>` | PEM bundle with additional CA certs for REST/GraphQL/SARIF upload |
+| `--purl <purl>` | Add a PURL / semver range / wildcard query (repeatable) |
+| `--purl-file <file>` | File with one query per line (supports comments) |
+| `--json` | Emit search results as JSON (to stdout unless `--output-file` specified) |
+| `--cli` | Also emit human‑readable output when producing JSON/CSV; requires `--output-file` to avoid mixed stdout |
+| `--csv` | Emit results (search + malware matches) as CSV (to stdout or `--output-file`) |
+| `--output-file <file>` | Write JSON/CSV output to file; required when using `--cli` with `--json` or `--csv` |
+| `--interactive` | Enter interactive PURL search prompt after initial processing |
+| `--sync-malware` | Fetch & cache malware advisories (MALWARE); requires a token |
+| `--match-malware` | Match SBOM packages against cached malware advisories |
+| `--malware-cache <dir>` | Directory to store malware advisory cache (required with malware operations) |
+| `--malware-cutoff <ISO-date>` | Exclude advisories whose `publishedAt` and `updatedAt` are both before cutoff |
+| `--ignore-file <path>` | YAML ignore file (advisories / purls / scoped blocks) to filter matches before output |
+| `--ignore-unbounded-malware` | Suppress advisories with effectively unbounded vulnerable ranges (e.g. `*`, `>=0`) |
+| `--sarif-dir <dir>` | Write SARIF 2.1.0 files per repository (for malware matches) |
+| `--upload-sarif` | Upload generated SARIF to Code Scanning (requires `--match-malware` and `--sarif-dir`) |
+| `--branch-scan` | Fetch SBOM diffs for non‑default branches (limited by `--branch-limit`) |
+| `--branch-limit <n>` | Limit number of non‑default branches scanned per repository (default 10) |
+| `--diff-base <branch>` | Override base branch for dependency review diffs (defaults to repository default branch) |
+| `--submit-on-missing-snapshot` | On diff 404, run Component Detection to submit a snapshot, then retry |
+| `--submit-languages <list>` | Limit snapshot submission to specific languages (comma‑separated) |
+| `--component-detection-bin <path>` | Path to local `component-detection` executable (skip download) |
+| `--debug` | Enable debug logging |
 
 ## Build & test
 
@@ -364,7 +465,7 @@ npm run start -- --sbom-cache fixtures/sboms --malware-cache fixtures/malware-ca
 
 Standard & secondary rate limits trigger an automatic retry (up to 2 times).
 
-You can tune concurrency and increase the delay to reduce the chance of hitting rate limits.
+You can tune concurrency and increase the various delays to reduce the chance of hitting rate limits, if you find that you have hit rate limits.
 
 Each time a secondary rate limit is hit, the delay between fetching SBOMs is increased by 10%, to provide a way to adaptively respond to that rate limit.
 

@@ -77,6 +77,8 @@ export interface RepositorySbom {
   etag?: string; // ETag from SBOM response (future: conditional requests)
   defaultBranchCommitSha?: string; // commit SHA of default branch at time of retrieval
   defaultBranchCommitDate?: string; // ISO date of that commit
+  // Branch-level diffs (optional when branch scanning enabled)
+  branchDiffs?: Map<string, BranchDependencyDiff>;
 }
 
 export interface CollectionSummary {
@@ -93,4 +95,37 @@ export interface CollectionSummary {
 export interface SearchResultEntry {
   repository: string;
   matches: SbomPackage[];
+}
+
+// Branch-specific SBOM capture
+export interface BranchSbom {
+  branch: string;
+  commitSha?: string;
+  retrievedAt: string;
+  sbom?: Sbom;
+  packages: SbomPackage[];
+  error?: string;
+}
+
+// Dependency Review change format (subset; future-proof with index signature)
+export interface DependencyReviewPackageChange {
+  changeType: string; // added | removed | updated
+  name?: string; // package name
+  ecosystem?: string; // e.g. npm, maven, pip
+  namespace?: string; // e.g. groupId for maven
+  packageURL?: string; // raw package URL
+  license?: string;
+  manifest?: string; // manifest path
+  scope?: string; // e.g. runtime, development
+  version?: string; // for added/removed
+  [k: string]: unknown;
+}
+
+export interface BranchDependencyDiff {
+  latestCommitDate?: string;
+  base: string; // base branch
+  head: string; // head branch
+  retrievedAt: string;
+  changes: DependencyReviewPackageChange[];
+  error?: string;
 }

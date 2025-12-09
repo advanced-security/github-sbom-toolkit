@@ -69,5 +69,25 @@
         }
       ]
     }
+  ],
+  "branchDiffs": [
+    {
+      "latestCommitDate": "2025-12-01T12:39:01.734Z",
+      "base": "main",
+      "head": "test",
+      "retrievedAt": "2025-12-01T12:39:01.734Z",
+      "changes": [
+        {
+          "changeType": "added",
+          "name": "chalk",
+          "ecosystem": "npm",
+          "packageURL": "pkg:npm/chalk@5.6.1",
+          "license": "MIT",
+          "manifest": "package-lock.json",
+          "scope": "runtime",
+          "version": "5.6.1"
+        }
+      ]
+    }
   ]
 }

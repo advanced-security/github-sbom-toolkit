@@ -67,7 +67,7 @@ function parsePurlIgnore(raw: string): ParsedPurlIgnore | null {
 export class IgnoreMatcher {
   private globalAdvisories: Set<string> = new Set();
   private globalPurls: ParsedPurlIgnore[] = [];
-  private scoped: Array<{ scope: string; isRepo: boolean; advisories: Set<string>; purls: ParsedPurlIgnore[] } > = [];
+  private scoped: Array<{ scope: string; isRepo: boolean; advisories: Set<string>; purls: ParsedPurlIgnore[] }> = [];
 
   static load(filePath: string, opts?: IgnoreMatcherOptions): IgnoreMatcher | undefined {
     const abs = path.isAbsolute(filePath) ? filePath : path.join(opts?.cwd || process.cwd(), filePath);

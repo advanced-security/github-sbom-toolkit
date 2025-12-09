@@ -4,3 +4,5 @@ dist/
 data/
 .vscode/
 .DS_Store
+component-detection
+tmp-branch-search-cache/

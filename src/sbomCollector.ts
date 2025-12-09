@@ -1,7 +1,8 @@
 import { createOctokit } from "./octokit.js";
-import type { RepositorySbom, CollectionSummary, SbomPackage, Sbom } from "./types.js";
+import type { RepositorySbom, CollectionSummary, SbomPackage, Sbom, BranchDependencyDiff, DependencyReviewPackageChange } from "./types.js";
 import * as semver from "semver";
 import { readAll, writeOne } from "./serialization.js";
+import { submitSnapshotIfPossible } from "./componentSubmission.js";
 // p-limit lacks bundled types in some versions; declare minimal shape
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
@@ -12,7 +13,9 @@ export interface CollectorOptions {
   token: string | undefined; // GitHub token with repo + security_events scope
   enterprise?: string; // Enterprise slug to enumerate orgs
   org?: string; // Single org alternative
-  baseUrl?: string; // For GHES
+  repo?: string; // Single repo alternative
+  baseUrl?: string; // For GHES, EMU and Data Residency
+  ghes?: boolean; // Is this a GHES instance?
   concurrency?: number; // parallel repo SBOM fetches
   includePrivate?: boolean;
   delayMsBetweenRepos?: number;
@@ -24,6 +27,25 @@ export interface CollectorOptions {
   suppressSecondaryRateLimitLogs?: boolean; // suppress secondary rate limit warning logs (so they don't break the progress bar)
   quiet?: boolean; // suppress non-error logging (does not affect progress bar)
   caBundlePath?: string; // path to PEM CA bundle for self-signed/internal certs
+  includeBranches?: boolean; // when true, fetch SBOM for non-default branches
+  branchLimit?: number; // limit number of branches per repo (excluding default)
+  branchDiffBase?: string; // override base branch for diffs (defaults to default branch)
+  submitOnMissingSnapshot?: boolean; // run component detection submission when diff 404
+  forceSubmission?: boolean; // always submit snapshot for branches prior to diff
+  submitLanguages?: string[]; // limit submission to these languages
+  componentDetectionBinPath?: string; // optional path to component-detection executable
+  snapshotIngestionDelayMs?: number; // delay after snapshot submission to allow ingestion before dependency review (default: 1500ms)
+  retryIngestionDelayMs?: number; // delay after snapshot submission before retrying dependency review on 404 (default: 3000ms)
+}
+
+interface ParsedQuery {
+  raw: string;
+  lower: string;
+  isPrefixWildcard: boolean;
+  exact?: string;
+  type?: string;
+  name?: string;
+  versionConstraint?: string;
 }
 
 export class SbomCollector {
@@ -35,8 +57,18 @@ export class SbomCollector {
   private decisions: Record<string, string> = {}; // repo -> reason
 
   constructor(options: CollectorOptions) {
-    if (!options.loadFromDir && !options.enterprise && !options.org) {
-      throw new Error("Either enterprise/org or loadFromDir must be specified");
+    if (!options.loadFromDir && !options.enterprise && !options.org && !options.repo) {
+      throw new Error("One of enterprise/org/repo or loadFromDir must be specified");
+    }
+    // Validate repo format if provided
+    if (options.repo) {
+      if (typeof options.repo !== "string" || !options.repo.includes("/")) {
+        throw new Error('If specifying "repo", it must be in the format "org/repo".');
+      }
+      const [orgPart, repoPart] = options.repo.split("/");
+      if (!orgPart || !repoPart) {
+        throw new Error('If specifying "repo", it must be in the format "org/repo" with both parts non-empty.');
+      }
     }
     // Spread user options first then apply defaults via nullish coalescing so that
     // passing undefined does not erase defaults
@@ -44,7 +76,9 @@ export class SbomCollector {
     this.opts = {
       token: o.token,
       enterprise: o.enterprise,
+      ghes: o.ghes ?? false,
       org: o.org,
+      repo: o.repo,
       baseUrl: o.baseUrl,
       concurrency: o.concurrency ?? 5,
       includePrivate: o.includePrivate ?? true,
@@ -56,7 +90,16 @@ export class SbomCollector {
       showProgressBar: o.showProgressBar ?? false,
       suppressSecondaryRateLimitLogs: o.suppressSecondaryRateLimitLogs ?? false,
       quiet: o.quiet ?? false,
-      caBundlePath: o.caBundlePath
+      caBundlePath: o.caBundlePath,
+      includeBranches: o.includeBranches ?? false,
+      branchLimit: o.branchLimit,
+      branchDiffBase: o.branchDiffBase,
+      submitOnMissingSnapshot: o.submitOnMissingSnapshot ?? false,
+      forceSubmission: o.forceSubmission ?? false,
+      submitLanguages: o.submitLanguages ?? undefined,
+      componentDetectionBinPath: o.componentDetectionBinPath,
+      snapshotIngestionDelayMs: o.snapshotIngestionDelayMs ?? 1500,
+      retryIngestionDelayMs: o.retryIngestionDelayMs ?? 3000
     } as Required<CollectorOptions>;
 
     if (this.opts.token) {
@@ -95,8 +138,8 @@ export class SbomCollector {
   async collect(): Promise<RepositorySbom[]> {
     // Offline mode: load from directory if provided
     if (this.opts.loadFromDir) {
-      // find just the path for a single org, if given
-      const loadPath = this.opts.org ? `${this.opts.loadFromDir}/${this.opts.org}` : this.opts.loadFromDir;
+      // find just the path for a single org or repo, if given
+      const loadPath = this.opts.org ? `${this.opts.loadFromDir}/${this.opts.org}` : this.opts.repo ? `${this.opts.loadFromDir}/${this.opts.repo}` : this.opts.loadFromDir;
 
       if (!this.opts.quiet) process.stderr.write(chalk.blue(`Loading SBOMs from cache at ${loadPath}`) + "\n");
 
@@ -132,19 +175,27 @@ export class SbomCollector {
       process.stderr.write(chalk.blue(`Getting list of organizations for enterprise ${this.opts.enterprise}`) + "\n");
     }
 
-    const orgs = this.opts.org ? [this.opts.org] : await this.listEnterpriseOrgs(this.opts.enterprise!);
+    const orgs = this.opts.org ? [this.opts.org] : this.opts.enterprise ? await this.listEnterpriseOrgs(this.opts.enterprise, this.opts.ghes) : [this.opts.repo.split("/")[0]];
     this.summary.orgs = orgs;
 
     // Pre-list all repos if showing progress bar so we know the total upfront
     const orgRepoMap: Record<string, { name: string; pushed_at?: string; updated_at?: string; default_branch?: string }[]> = {};
     let totalRepos = 0;
-    for (const org of orgs) {
-      if (!this.opts.quiet) process.stderr.write(chalk.blue(`Listing repositories for org ${org}`) + "\n");
-      if (this.opts.lightDelayMs) await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
-      const repos = await this.listOrgRepos(org);
-      orgRepoMap[org] = repos;
-      totalRepos += repos.length;
+
+    if (!this.opts.repo) {
+      for (const org of orgs) {
+        if (!this.opts.quiet) process.stderr.write(chalk.blue(`Listing repositories for org ${org}`) + "\n");
+        if (this.opts.lightDelayMs) await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
+        const repos = await this.listOrgRepos(org);
+        orgRepoMap[org] = repos;
+        totalRepos += repos.length;
+      }
+    } else {
+      totalRepos = 1;
+      const [org, repoName] = this.opts.repo.split("/");
+      orgRepoMap[org] = [await this.getRepo(org, repoName)];
     }
+
     this.summary.repositoryCount = totalRepos;
 
     let processed = 0;
@@ -222,8 +273,11 @@ export class SbomCollector {
             this.decisions[fullName] = `Fetching because error comparing pushed_at (${baseline.repoPushedAt} / ${repo.pushed_at})`;
           }
         } else {
-          this.decisions[fullName] = baseline ? `Fetching because missing pushed_at (${baseline.repoPushedAt} / ${repo.pushed_at})` : "Fetching because no baseline";
+          this.decisions[fullName] = baseline ? `Fetching because of missing pushed_at (${baseline.repoPushedAt} / ${repo.pushed_at})` : "Fetching because no baseline";
         }
+
+        let sbom: RepositorySbom | undefined = undefined;
+
         if (!skipped) {
           const res = await this.fetchSbom(org, repo.name, repo);
           if (this.opts.delayMsBetweenRepos) {
@@ -233,18 +287,95 @@ export class SbomCollector {
             res.defaultBranchCommitSha = pendingCommitMeta.sha;
             res.defaultBranchCommitDate = pendingCommitMeta.date;
           }
-          newSboms.push(res);
-          if (res.error) this.summary.failedCount++; else this.summary.successCount++;
-          // Write freshly fetched SBOM immediately if a cache directory is configured
-          if (this.opts.loadFromDir && this.opts.syncSboms && this.opts.loadFromDir.length) {
-            try { writeOne(res, { outDir: this.opts.loadFromDir }); } catch { /* ignore write errors */ }
+
+          sbom = res;
+        } else {
+          sbom = baseline;
+        }
+
+        // Branch scanning (optional)
+        if (this.opts.includeBranches && sbom && sbom.sbom) {
+
+          console.debug(chalk.blue(`Scanning branches for ${fullName}...`));
+
+          try {
+            const branches = await this.listBranches(org, repo.name);
+
+            if (this.opts.lightDelayMs) await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
+
+            const nonDefault = branches.filter(b => b.name !== sbom.defaultBranch);
+            const limited = this.opts.branchLimit && this.opts.branchLimit > 0 ? nonDefault.slice(0, this.opts.branchLimit) : nonDefault;
+            const branchDiffs: Map<string, BranchDependencyDiff> = new Map();
+            for (const b of limited) {
+
+              // get the commits, compare to the stored diff info. If the latest commit is newer, then fetch diff, otherwise skip
+              const latestCommit = await this.getLatestCommit(org, repo.name, b.name);
+
+              if (this.opts.lightDelayMs) await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
+              
+              if (!latestCommit) {
+                console.error(chalk.red(`Failed to get latest commit for ${fullName} branch ${b.name}.`));
+                continue;
+              }
+
+              const existing = sbom.branchDiffs instanceof Map ? sbom.branchDiffs.get(b.name) : undefined;
+              if (await this.isCommitNewer(latestCommit, existing) || this.opts.forceSubmission) {
+                console.debug(chalk.green(`Fetching branch diff for ${fullName} branch ${b.name}...`));
+              } else {
+                console.debug(chalk.yellow(`Skipping branch diff for ${fullName} branch ${b.name} (no new commits).`));
+                // keep existing diff
+                if (existing) {
+                  branchDiffs.set(b.name, existing);
+                }
+                continue;
+              }
+
+              const base = this.opts.branchDiffBase || sbom?.defaultBranch;
+              if (!base) { console.error(chalk.red(`Cannot compute branch diff for ${fullName} branch ${b.name} because base branch is undefined.`)); continue; }
+
+              // Optionally perform dependency submission up front for the branch
+              if (this.opts.forceSubmission) {
+                try {
+                  console.debug(chalk.blue(`Force-submission enabled: submitting component snapshot for ${fullName} branch ${b.name}...`));
+                  if (await submitSnapshotIfPossible({ octokit: this.octokit, owner: org, repo: repo.name, branch: b.name, languages: this.opts.submitLanguages, quiet: this.opts.quiet, componentDetectionBinPath: this.opts.componentDetectionBinPath })) {
+                    // Brief delay to allow GitHub to ingest the submitted snapshot before attempting dependency review.
+                    // This prevents race conditions where the review diff is requested before the snapshot is available.
+                    await new Promise(r => setTimeout(r, this.opts.snapshotIngestionDelayMs));
+                  }
+                } catch (subErr) {
+                  console.error(chalk.red(`Force submission failed for ${fullName} branch ${b.name}: ${(subErr as Error).message}`));
+                }
+              }
+              const diff = await this.fetchDependencyReviewDiff(org, repo.name, base, b.name, 1, latestCommit);
+              branchDiffs.set(b.name, diff);
+            }
+            if (branchDiffs.size) sbom.branchDiffs = branchDiffs;
+          } catch (e) {
+            // Non-fatal; annotate decision
+            this.decisions[fullName] = (this.decisions[fullName] || "") + ` (branch scan error: ${(e as Error).message})`;
+            console.debug((e as Error).message);
           }
+        }
+
+        if (!sbom || sbom.error) this.summary.failedCount++; else this.summary.successCount++;
+
+        // Write freshly fetched SBOM immediately if a cache directory is configured
+        if (sbom && !sbom.error && this.opts.loadFromDir && this.opts.syncSboms && this.opts.loadFromDir.length) {
+          try { writeOne(sbom, { outDir: this.opts.loadFromDir }); } catch { /* ignore write errors */ }
+        }
+
+        if (sbom) {
+          newSboms.push(sbom);
         }
         processed++;
         renderBar();
       }));
       await Promise.all(tasks);
-      newSboms = newSboms.filter(s => repoNames.has(s.repo));
+
+      newSboms = newSboms.filter(s => {
+        const repoToCheck = s.repo.includes("/") ? s.repo.split("/")[1] : s.repo;
+        return repoNames.has(repoToCheck);
+      });
       this.sboms.push(...newSboms);
     }
     if (this.opts.showProgressBar) process.stdout.write("\n");
@@ -253,11 +384,35 @@ export class SbomCollector {
     return this.sboms;
   }
 
-  private async listEnterpriseOrgs(enterprise: string): Promise<string[]> {
-    // GitHub API: GET /enterprises/{enterprise}/orgs (preview might require accept header)
-
+  private async getLatestCommit(org: string, repo: string, branch: string): Promise<{ sha?: string; commitDate?: string } | null> {
     if (!this.octokit) throw new Error("No Octokit instance");
+    try {
+      const resp = await this.octokit.request("GET /repos/{owner}/{repo}/commits", { owner: org, repo, sha: branch });
 
+      await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
+
+      const commitSha = resp.data?.[0]?.sha;
+      const commitDate = resp.data?.[0]?.commit?.author?.date;
+      return { sha: commitSha, commitDate };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error(`Failed to get latest commit for ${org}/${repo} branch ${branch}: ${msg}`);
+      return null;
+    }
+  }
+
+  private async isCommitNewer(latestCommit: { sha?: string; commitDate?: string }, existingDiff?: BranchDependencyDiff): Promise<boolean> {
+    if (!existingDiff || !existingDiff.latestCommitDate) {
+      return true;
+    }
+    if (latestCommit.commitDate && existingDiff.latestCommitDate) {
+      return new Date(latestCommit.commitDate) > new Date(existingDiff.latestCommitDate);
+    }
+    return false;
+  }
+
+  private async listEnterpriseOrgs(enterprise: string, ghes: boolean): Promise<string[]> {
+    if (!this.octokit) throw new Error("No Octokit instance");
     interface Org { login: string }
     try {
       const orgs: string[] = [];
@@ -265,7 +420,7 @@ export class SbomCollector {
       let page = 1;
       let done = false;
       while (!done) {
-        const resp = await this.octokit.request("GET /enterprises/{enterprise}/orgs", { enterprise, per_page, page });
+        const resp = await this.octokit.request(ghes ? "GET /orgs" : "GET /enterprises/{enterprise}/orgs", { enterprise, per_page, page });
         const items = resp.data as unknown as Org[];
         for (const o of items) orgs.push(o.login);
         if (items.length < per_page) done = true; else page++;
@@ -280,7 +435,6 @@ export class SbomCollector {
   private async listOrgRepos(org: string): Promise<{ name: string; pushed_at?: string; updated_at?: string; default_branch?: string }[]> {
     if (!this.octokit) throw new Error("No Octokit instance");
 
-    // GET /orgs/{org}/repos
     interface RepoMeta { name: string; pushed_at?: string; updated_at?: string; default_branch?: string }
     const repos: RepoMeta[] = [];
     const per_page = 100;
@@ -289,6 +443,9 @@ export class SbomCollector {
     while (!done) {
       try {
         const resp = await this.octokit.request("GET /orgs/{org}/repos", { org, per_page, page, type: this.opts.includePrivate ? "all" : "public" });
+
+        await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
+
         const items = resp.data as Array<{ name: string; pushed_at?: string; updated_at?: string; default_branch?: string }>;
         for (const r of items) {
           repos.push({ name: r.name, pushed_at: r.pushed_at, updated_at: r.updated_at, default_branch: r.default_branch });
@@ -303,12 +460,27 @@ export class SbomCollector {
     return repos;
   }
 
+  private async getRepo(org: string, repo: string): Promise<{ name: string; pushed_at?: string; updated_at?: string; default_branch?: string }> {
+    if (!this.octokit) throw new Error("No Octokit instance");
+
+    try {
+      const resp = await this.octokit.request("GET /repos/{owner}/{repo}", { owner: org, repo });
+
+      await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
+
+      const data = resp.data as { name: string; pushed_at?: string; updated_at?: string; default_branch?: string };
+      return data;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new Error(`Failed to get repo metadata for ${org}/${repo}: ${msg}`);
+    }
+  }
+
   private async fetchSbom(org: string, repo: string, repoMeta?: { pushed_at?: string; updated_at?: string; default_branch?: string }): Promise<RepositorySbom> {
     if (!this.octokit) throw new Error("No Octokit instance");
 
     const fullName = `${org}/${repo}`;
     try {
-      // TODO: Ensure dependency graph is enabled before requesting SBOM
       const resp = await this.octokit.request("GET /repos/{owner}/{repo}/dependency-graph/sbom", { owner: org, repo, headers: { Accept: "application/vnd.github+json" } });
       const sbomWrapper = resp.data as { sbom?: Sbom };
       const packages: SbomPackage[] = sbomWrapper?.sbom?.packages ?? [];
@@ -340,18 +512,85 @@ export class SbomCollector {
     }
   }
 
+  private async listBranches(org: string, repo: string): Promise<{ name: string; protected?: boolean; commit?: { sha?: string } }[]> {
+    if (!this.octokit) throw new Error("No Octokit instance");
+    const branches: { name: string; protected?: boolean; commit?: { sha?: string } }[] = [];
+    const per_page = 100; let page = 1; let done = false;
+    while (!done) {
+      try {
+        const resp = await this.octokit.request("GET /repos/{owner}/{repo}/branches", { owner: org, repo, per_page, page });
+        await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
+
+        const data = resp.data as Array<{ name: string; protected?: boolean; commit?: { sha?: string } }>;
+        branches.push(...data);
+        if (data.length < per_page) done = true; else page++;
+      } catch (e) {
+        throw new Error(`Failed listing branches for ${org}/${repo}: ${(e as Error).message}`);
+      }
+    }
+    return branches;
+  }
+
+  private async fetchDependencyReviewDiff(org: string, repo: string, base: string, head: string, retries: number, latestCommit?: { sha?: string; commitDate?: string }): Promise<BranchDependencyDiff> {
+    if (!this.octokit) throw new Error("No Octokit instance");
+    if (retries < 0) {
+      return { latestCommitDate: undefined, base, head, retrievedAt: new Date().toISOString(), changes: [], error: "Exceeded maximum retries for fetching dependency review diff" };
+    }
+    try {
+      const basehead = `${base}...${head}`;
+      const resp = await this.octokit.request("GET /repos/{owner}/{repo}/dependency-graph/compare/{basehead}", { owner: org, repo, basehead, headers: { Accept: "application/vnd.github+json" } });
+      await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
+
+      // Response shape includes change_set array (per docs). We normalize to DependencyReviewPackageChange[]
+      const raw = resp.data;
+
+      const changes: DependencyReviewPackageChange[] = [];
+      for (const c of raw) {
+        const obj = c as Record<string, unknown>;
+        const change: DependencyReviewPackageChange = {
+          changeType: String(obj.change_type || "unknown"),
+          name: obj.name as string | undefined,
+          ecosystem: obj.ecosystem as string | undefined,
+          packageURL: obj.package_url as string | undefined,
+          license: obj.license as string | undefined,
+          manifest: obj.manifest as string | undefined,
+          scope: obj.scope as string | undefined,
+          version: obj.version as string | undefined
+        };
+        changes.push(change);
+      }
+      return { latestCommitDate: latestCommit?.commitDate || new Date().toISOString(), base, head, retrievedAt: new Date().toISOString(), changes };
+    } catch (e) {
+      const status = (e as { status?: number })?.status;
+      let reason = e instanceof Error ? e.message : String(e);
+      if (status === 404) {
+        reason = "Dependency review unavailable (missing snapshot, feature disabled, or repo not found)";
+        // Optional retry path: submit snapshot then retry once
+        if (this.opts.submitOnMissingSnapshot) {
+          console.log(chalk.blue(`Attempting to submit component snapshot for ${org}/${repo} branch ${head} before retrying dependency review diff...`));
+          try {
+            const ok = await submitSnapshotIfPossible({ octokit: this.octokit, owner: org, repo: repo, branch: head, languages: this.opts.submitLanguages, quiet: this.opts.quiet, componentDetectionBinPath: this.opts.componentDetectionBinPath });
+            if (ok) {
+              // Delay after snapshot submission to allow GitHub to ingest and process the snapshot
+              // before retrying the dependency review API. This helps avoid 404 errors on retry.
+              console.debug(chalk.blue(`Snapshot submission attempted; waiting ${this.opts.retryIngestionDelayMs / 1000} seconds before retrying dependency review diff for ${org}/${repo} ${base}...${head}...`));
+              await new Promise(r => setTimeout(r, this.opts.retryIngestionDelayMs));
+              return await this.fetchDependencyReviewDiff(org, repo, base, head, retries - 1, latestCommit);
+            }
+          } catch (subErr) {
+            console.error(chalk.red(`Snapshot submission failed for ${org}/${repo} branch ${head}: ${(subErr as Error).message}`));
+            reason += ` (submission attempt failed: ${(subErr as Error).message})`;
+          }
+        }
+      }
+      return { latestCommitDate: undefined, base, head, retrievedAt: new Date().toISOString(), changes: [], error: reason };
+    }
+  }
+
   // New method including the query that produced each match
   searchByPurlsWithReasons(purls: string[]): Map<string, { purl: string; reason: string }[]> {
     purls = purls.map(q => q.startsWith("pkg:") ? q : `pkg:${q}`);
-    interface ParsedQuery {
-      raw: string;
-      lower: string;
-      isPrefixWildcard: boolean;
-      exact?: string;
-      type?: string;
-      name?: string;
-      versionConstraint?: string;
-    }
+
     const looksLikeSemverRange = (v: string) => /[\^~><=]|\|\|/.test(v.trim());
     const parseQuery = (raw: string): ParsedQuery | null => {
       const trimmed = raw.trim();
@@ -379,6 +618,7 @@ export class SbomCollector {
     const queries: ParsedQuery[] = purls.map(parseQuery).filter((q): q is ParsedQuery => !!q);
     const results = new Map<string, { purl: string; reason: string }[]>();
     if (!queries.length) return results;
+
     for (const repoSbom of this.sboms) {
       if (repoSbom.error) continue;
       interface ExtRef { referenceType: string; referenceLocator: string }
@@ -388,41 +628,65 @@ export class SbomCollector {
         const candidatePurls: string[] = [];
         if (refs) for (const r of refs) if (r.referenceType === "purl" && r.referenceLocator) candidatePurls.push(r.referenceLocator);
         if ((pkg as { purl?: string }).purl) candidatePurls.push((pkg as { purl?: string }).purl as string);
-        const unique = Array.from(new Set(candidatePurls));
-        for (const p of unique) {
-          const pLower = p.toLowerCase();
-          for (const q of queries) {
-            if (q.isPrefixWildcard) {
-              const prefix = q.lower.slice(0, -1);
-              if (pLower.startsWith(prefix)) { if (!found.has(p)) found.set(p, q.raw); }
-              continue;
-            }
-            if (q.versionConstraint && q.type && q.name) {
-              if (!pLower.startsWith("pkg:")) continue;
-              const body = p.slice(4);
-              const atIdx = body.indexOf("@");
-              const main = atIdx >= 0 ? body.slice(0, atIdx) : body;
-              const ver = atIdx >= 0 ? body.slice(atIdx + 1) : (pkg.version as string | undefined) || undefined;
-              const slashIdx = main.indexOf("/");
-              if (slashIdx < 0) continue;
-              const pType = main.slice(0, slashIdx).toLowerCase();
-              const pName = main.slice(slashIdx + 1);
-              if (pType === q.type && pName.toLowerCase() === q.name.toLowerCase() && ver) {
-                try {
-                  const coerced = semver.coerce(ver)?.version || ver;
-                  if (semver.valid(coerced) && semver.satisfies(coerced, q.versionConstraint, { includePrerelease: true })) {
-                    if (!found.has(p)) found.set(p, q.raw);
-                  }
-                } catch { /* ignore */ }
-              }
-            } else if (q.exact) {
-              if (pLower === q.exact) { if (!found.has(p)) found.set(p, q.raw); }
-            }
+        applyQueries(candidatePurls, queries, found, undefined, (pkg.version as string | undefined) || undefined);
+      }
+      // Include dependency review diff additions/updates (head packages only)
+      if (repoSbom.branchDiffs) {
+        const diffs = repoSbom.branchDiffs.values();
+        for (const diff of diffs) {
+          for (const change of diff.changes) {
+            if (change.changeType !== "added" && change.changeType !== "updated") continue;
+            const candidatePurls: string[] = [];
+            if ((change as { purl?: string }).purl) candidatePurls.push((change as { purl?: string }).purl as string);
+            if (change.packageURL) candidatePurls.push(change.packageURL);
+            applyQueries(candidatePurls, queries, found, diff.head, change.version);
           }
         }
       }
       if (found.size) results.set(repoSbom.repo, Array.from(found.entries()).map(([purl, reason]) => ({ purl, reason })));
     }
     return results;
+  }
+}
+
+function applyQueries(
+  candidatePurls: string[],
+  queries: ParsedQuery[],
+  found: Map<string, string>,
+  branchTag?: string,
+  fallbackVersion?: string
+) {
+  const unique = Array.from(new Set(candidatePurls));
+  for (const p of unique) {
+    const pLower = p.toLowerCase();
+    const outKey = branchTag ? `${p}@${branchTag}` : p;
+    for (const q of queries) {
+      if (q.isPrefixWildcard) {
+        const prefix = q.lower.slice(0, -1);
+        if (pLower.startsWith(prefix)) { if (!found.has(outKey)) found.set(outKey, q.raw); }
+        continue;
+      }
+      if (q.versionConstraint && q.type && q.name) {
+        if (!pLower.startsWith("pkg:")) continue;
+        const body = p.slice(4);
+        const atIdx = body.indexOf("@");
+        const main = atIdx >= 0 ? body.slice(0, atIdx) : body;
+        const ver = atIdx >= 0 ? body.slice(atIdx + 1) : fallbackVersion;
+        const slashIdx = main.indexOf("/");
+        if (slashIdx < 0) continue;
+        const pType = main.slice(0, slashIdx).toLowerCase();
+        const pName = main.slice(slashIdx + 1);
+        if (pType === q.type && pName.toLowerCase() === q.name.toLowerCase() && ver) {
+          try {
+            const coerced = semver.coerce(ver)?.version || ver;
+            if (semver.valid(coerced) && semver.satisfies(coerced, q.versionConstraint, { includePrerelease: true })) {
+              if (!found.has(outKey)) found.set(outKey, q.raw);
+            }
+          } catch { /* ignore */ }
+        }
+      } else if (q.exact) {
+        if (pLower === q.exact) { if (!found.has(outKey)) found.set(outKey, q.raw); }
+      }
+    }
   }
 }
