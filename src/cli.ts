@@ -30,7 +30,7 @@ async function main() {
     .option("quiet", { type: "boolean", default: false, describe: "Suppress all non-error output (does not suppress progress bar or JSON)" })
     .option("interactive", { type: "boolean", default: false, describe: "Enter interactive PURL search mode after collection" })
     .option("sync-malware", { type: "boolean", default: false, describe: "Sync malware advisories (MALWARE classification) to local cache" })
-    .option("malware-cache", { type: "string", default: "malware-cache", describe: "Directory to store malware advisory cache" })
+    .option("malware-cache", { type: "string", describe: "Directory to store malware advisory cache" })
     .option("malware-since", { type: "string", describe: "Override last sync timestamp (ISO) for malware advisory incremental sync" })
     .option("ca-bundle", { type: "string", describe: "Path to PEM file with additional CA certificate(s) (self-signed/internal)" })
     .option("match-malware", { type: "boolean", default: false, describe: "After sync/load, match SBOM packages against malware advisories" })
