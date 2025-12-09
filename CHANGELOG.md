@@ -1,6 +1,6 @@
 # Changelog
 
-## [2025-12-04] – 0.2.0 - Branch scanning and dependency submission
+## [2025-12-09] – 0.2.0 - Branch scanning and dependency submission
 
 Added:
 
@@ -11,6 +11,7 @@ Added:
   - Automatically submits dependency snapshots for branches being scanned, if not already present, using Component Detection.
   - Language-aware sparse checkout.
   - Use a pre-downloaded binary (`--component-detection-bin`) or an auto-downloaded release.
+  - Allows forcing submission, even if a snapshot already exists.
 - Search and matching:
   - Refactored search to de-duplicate logic and include branch diffs (added/updated packages only).
   - Malware matching enhanced to enumerate packages from diffs; matches annotated with branch.
@@ -21,7 +22,7 @@ Added:
   - JSON/CLI/CSV interaction clarified and documented.
   - Added examples for malware-only sync and branch scanning.
 - Advisory sync robustness:
-  - GraphQL advisory sync now implements adaptive retries with exponential backoff and `Retry-After` support; respects `--quiet`.
+  - GraphQL advisory sync implements adaptive retries with exponential backoff and `Retry-After` support.
 
 Fixed:
 
