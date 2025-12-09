@@ -301,7 +301,7 @@ async function main() {
       }
     }
     const malwareRows: Array<{ repo: string; purl: string; advisory: string; range: string | null; updatedAt: string; branch: string | undefined }> = [];
-    if (malwareMatches) {
+    if (malwareMatches.length) {
       for (const m of malwareMatches) {
         malwareRows.push({ repo: m.repo, purl: m.purl, advisory: m.advisoryGhsaId, range: m.vulnerableVersionRange, updatedAt: m.advisoryUpdatedAt, branch: m.branch });
       }
