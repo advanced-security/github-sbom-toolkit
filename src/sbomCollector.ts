@@ -349,14 +349,15 @@ export class SbomCollector {
             this.decisions[fullName] = (this.decisions[fullName] || "") + ` (branch scan error: ${(e as Error).message})`;
             console.debug((e as Error).message);
           }
-
-          if (sbom.error) this.summary.failedCount++; else this.summary.successCount++;
-
-          // Write freshly fetched SBOM immediately if a cache directory is configured
-          if (this.opts.loadFromDir && this.opts.syncSboms && this.opts.loadFromDir.length) {
-            try { writeOne(sbom, { outDir: this.opts.loadFromDir }); } catch { /* ignore write errors */ }
-          }
         }
+
+        if (!sbom || sbom.error) this.summary.failedCount++; else this.summary.successCount++;
+
+        // Write freshly fetched SBOM immediately if a cache directory is configured
+        if (sbom && !sbom.error && this.opts.loadFromDir && this.opts.syncSboms && this.opts.loadFromDir.length) {
+          try { writeOne(sbom, { outDir: this.opts.loadFromDir }); } catch { /* ignore write errors */ }
+        }
+        
         if (sbom) {
           newSboms.push(sbom);
         }
