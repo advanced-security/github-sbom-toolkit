@@ -34,6 +34,8 @@ export interface CollectorOptions {
   forceSubmission?: boolean; // always submit snapshot for branches prior to diff
   submitLanguages?: string[]; // limit submission to these languages
   componentDetectionBinPath?: string; // optional path to component-detection executable
+  snapshotIngestionDelayMs?: number; // delay after snapshot submission to allow ingestion before dependency review (default: 1500ms)
+  retryIngestionDelayMs?: number; // delay after snapshot submission before retrying dependency review on 404 (default: 3000ms)
 }
 
 export class SbomCollector {
@@ -85,7 +87,9 @@ export class SbomCollector {
       submitOnMissingSnapshot: o.submitOnMissingSnapshot ?? false,
       forceSubmission: o.forceSubmission ?? false,
       submitLanguages: o.submitLanguages ?? undefined,
-      componentDetectionBinPath: o.componentDetectionBinPath
+      componentDetectionBinPath: o.componentDetectionBinPath,
+      snapshotIngestionDelayMs: o.snapshotIngestionDelayMs ?? 1500,
+      retryIngestionDelayMs: o.retryIngestionDelayMs ?? 3000
     } as Required<CollectorOptions>;
 
     if (this.opts.token) {
@@ -319,8 +323,9 @@ export class SbomCollector {
                 try {
                   console.debug(chalk.blue(`Force-submission enabled: submitting component snapshot for ${fullName} branch ${b.name}...`));
                   if (await submitSnapshotIfPossible({ octokit: this.octokit, owner: org, repo: repo.name, branch: b.name, languages: this.opts.submitLanguages, quiet: this.opts.quiet, componentDetectionBinPath: this.opts.componentDetectionBinPath })) {
-                    // brief delay to allow snapshot ingestion
-                    await new Promise(r => setTimeout(r, 1500));
+                    // Brief delay to allow GitHub to ingest the submitted snapshot before attempting dependency review.
+                    // This prevents race conditions where the review diff is requested before the snapshot is available.
+                    await new Promise(r => setTimeout(r, this.opts.snapshotIngestionDelayMs));
                   }
                 } catch (subErr) {
                   console.error(chalk.red(`Force submission failed for ${fullName} branch ${b.name}: ${(subErr as Error).message}`));
@@ -538,8 +543,10 @@ export class SbomCollector {
           try {
             const ok = await submitSnapshotIfPossible({ octokit: this.octokit, owner: org, repo: repo, branch: head, languages: this.opts.submitLanguages, quiet: this.opts.quiet, componentDetectionBinPath: this.opts.componentDetectionBinPath });
             if (ok) {
-              console.log(chalk.blue(`Snapshot submission attempted; waiting 3 seconds before retrying dependency review diff for ${org}/${repo} ${base}...${head}...`));
-              await new Promise(r => setTimeout(r, 3000));
+              // Delay after snapshot submission to allow GitHub to ingest and process the snapshot
+              // before retrying the dependency review API. This helps avoid 404 errors on retry.
+              console.log(chalk.blue(`Snapshot submission attempted; waiting ${this.opts.retryIngestionDelayMs / 1000} seconds before retrying dependency review diff for ${org}/${repo} ${base}...${head}...`));
+              await new Promise(r => setTimeout(r, this.opts.retryIngestionDelayMs));
               return await this.fetchDependencyReviewDiff(org, repo, base, head, retries - 1, latestCommit);
             }
           } catch (subErr) {
