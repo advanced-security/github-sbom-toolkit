@@ -315,7 +315,16 @@ export default class ComponentDetection {
       let downloadURL: string = "";
       // TODO: do we need to handle different architectures here?
       // can we allow x64 on MacOS? We could allow an input parameter to override?
-      const assetName = process.platform === "win32" ? "component-detection-win-x64.exe" : process.platform === "linux" ? "component-detection-linux-x64" : "component-detection-osx-arm64";
+      let assetName: string;
+      if (process.platform === "win32") {
+        assetName = "component-detection-win-x64.exe";
+      } else if (process.platform === "linux") {
+        assetName = "component-detection-linux-x64";
+      } else if (process.platform === "darwin") {
+        assetName = "component-detection-osx-arm64";
+      } else {
+        throw new Error(`Unsupported platform: ${process.platform}`);
+      }
       latestRelease.data.assets.forEach((asset: any) => {
         if (asset.name === assetName) {
           downloadURL = asset.browser_download_url;
