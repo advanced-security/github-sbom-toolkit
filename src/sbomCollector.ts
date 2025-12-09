@@ -38,6 +38,16 @@ export interface CollectorOptions {
   retryIngestionDelayMs?: number; // delay after snapshot submission before retrying dependency review on 404 (default: 3000ms)
 }
 
+interface ParsedQuery {
+  raw: string;
+  lower: string;
+  isPrefixWildcard: boolean;
+  exact?: string;
+  type?: string;
+  name?: string;
+  versionConstraint?: string;
+}
+
 export class SbomCollector {
   private octokit: ReturnType<typeof createOctokit> | undefined; // explicit type
   private opts: Required<CollectorOptions>;
@@ -562,15 +572,7 @@ export class SbomCollector {
   // New method including the query that produced each match
   searchByPurlsWithReasons(purls: string[]): Map<string, { purl: string; reason: string }[]> {
     purls = purls.map(q => q.startsWith("pkg:") ? q : `pkg:${q}`);
-    interface ParsedQuery {
-      raw: string;
-      lower: string;
-      isPrefixWildcard: boolean;
-      exact?: string;
-      type?: string;
-      name?: string;
-      versionConstraint?: string;
-    }
+
     const looksLikeSemverRange = (v: string) => /[\^~><=]|\|\|/.test(v.trim());
     const parseQuery = (raw: string): ParsedQuery | null => {
       const trimmed = raw.trim();
@@ -598,7 +600,37 @@ export class SbomCollector {
     const queries: ParsedQuery[] = purls.map(parseQuery).filter((q): q is ParsedQuery => !!q);
     const results = new Map<string, { purl: string; reason: string }[]>();
     if (!queries.length) return results;
-// Move applyQueries to module scope
+
+    for (const repoSbom of this.sboms) {
+      if (repoSbom.error) continue;
+      interface ExtRef { referenceType: string; referenceLocator: string }
+      const found = new Map<string, string>(); // purl -> query
+      for (const pkg of repoSbom.packages as Array<SbomPackage & { externalRefs?: ExtRef[] }>) {
+        const refs = pkg.externalRefs;
+        const candidatePurls: string[] = [];
+        if (refs) for (const r of refs) if (r.referenceType === "purl" && r.referenceLocator) candidatePurls.push(r.referenceLocator);
+        if ((pkg as { purl?: string }).purl) candidatePurls.push((pkg as { purl?: string }).purl as string);
+        applyQueries(candidatePurls, queries, found, undefined, (pkg.version as string | undefined) || undefined);
+      }
+      // Include dependency review diff additions/updates (head packages only)
+      if (repoSbom.branchDiffs) {
+        const diffs = repoSbom.branchDiffs.values();
+        for (const diff of diffs) {
+          for (const change of diff.changes) {
+            if (change.changeType !== "added" && change.changeType !== "updated") continue;
+            const candidatePurls: string[] = [];
+            if ((change as { purl?: string }).purl) candidatePurls.push((change as { purl?: string }).purl as string);
+            if (change.packageURL) candidatePurls.push(change.packageURL);
+            applyQueries(candidatePurls, queries, found, diff.head, change.version);
+          }
+        }
+      }
+      if (found.size) results.set(repoSbom.repo, Array.from(found.entries()).map(([purl, reason]) => ({ purl, reason })));
+    }
+    return results;
+  }
+}
+
 function applyQueries(
   candidatePurls: string[],
   queries: ParsedQuery[],
@@ -638,34 +670,5 @@ function applyQueries(
         if (pLower === q.exact) { if (!found.has(outKey)) found.set(outKey, q.raw); }
       }
     }
-  }
-}
-    for (const repoSbom of this.sboms) {
-      if (repoSbom.error) continue;
-      interface ExtRef { referenceType: string; referenceLocator: string }
-      const found = new Map<string, string>(); // purl -> query
-      for (const pkg of repoSbom.packages as Array<SbomPackage & { externalRefs?: ExtRef[] }>) {
-        const refs = pkg.externalRefs;
-        const candidatePurls: string[] = [];
-        if (refs) for (const r of refs) if (r.referenceType === "purl" && r.referenceLocator) candidatePurls.push(r.referenceLocator);
-        if ((pkg as { purl?: string }).purl) candidatePurls.push((pkg as { purl?: string }).purl as string);
-        applyQueries(candidatePurls, queries, found, undefined, (pkg.version as string | undefined) || undefined);
-      }
-      // Include dependency review diff additions/updates (head packages only)
-      if (repoSbom.branchDiffs) {
-        const diffs = repoSbom.branchDiffs.values();
-        for (const diff of diffs) {
-          for (const change of diff.changes) {
-            if (change.changeType !== "added" && change.changeType !== "updated") continue;
-            const candidatePurls: string[] = [];
-            if ((change as { purl?: string }).purl) candidatePurls.push((change as { purl?: string }).purl as string);
-            if (change.packageURL) candidatePurls.push(change.packageURL);
-            applyQueries(candidatePurls, queries, found, diff.head, change.version);
-          }
-        }
-      }
-      if (found.size) results.set(repoSbom.repo, Array.from(found.entries()).map(([purl, reason]) => ({ purl, reason })));
-    }
-    return results;
   }
 }
