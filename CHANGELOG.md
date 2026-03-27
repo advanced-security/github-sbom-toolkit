@@ -1,5 +1,12 @@
 # Changelog
 
+## [2026-03-26] - 0.2.1 - Archived repository filtering
+
+Added:
+
+- SBOM collection can now exclude archived repositories before queuing fetches via `--exclude-archived`.
+- This reduces unnecessary API calls and prevents archived repositories from affecting SBOM fetch totals/results when exclusion is enabled.
+
 ## [2025-12-09] – 0.2.0 - Branch scanning and dependency submission
 
 Added:
