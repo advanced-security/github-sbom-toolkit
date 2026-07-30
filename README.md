@@ -433,27 +433,18 @@ npm run build
 
 ## 🧪 Test
 
-The repo ships with a minimal test fixture to validate end-to-end malware matching without making network calls.
+The repo ships with fixtures (a sample SBOM and a malware advisory cache) to validate malware matching, ignore-file handling, serialization and branch-diff search entirely offline, with no network calls or GitHub token required.
 
-1. Build the project:
+Run the full suite with:
 
 ```bash
 npm install
-npm run build
+npm test
 ```
 
-2. Run the test harness script:
+`npm test` builds the project and then runs every `*.test.ts` file (compiled to `dist/`) with Node's built-in test runner. See [TESTING.md](TESTING.md) for more details on the test layout and how to add new tests.
 
-```bash
-node dist/test-fixture-match.js
-```
-
-You should see output similar to:
-
-```text
-Matches:
-chalk-org/chalk-repo => pkg:npm/chalk@5.6.1 matched advisory GHSA-test-chalk-561 range =5.6.1
-```
+A [CI workflow](.github/workflows/ci.yml) runs the same build + test steps on every push and pull request (including Dependabot PRs), across all Node.js versions listed in `engines`.
 
 Alternatively, you can exercise the CLI purely offline using the fixtures (no token required):
 
