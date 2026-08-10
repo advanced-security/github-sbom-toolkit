@@ -19,21 +19,21 @@
   },
   "dependencies": {
     "@github/dependency-submission-toolkit": "^2.0.5",
-    "@octokit/core": "^7.0.6",
+    "@octokit/core": "^7.0.7",
     "@octokit/graphql": "^9.0.1",
     "@octokit/plugin-paginate-rest": "^14.0.0",
     "@octokit/plugin-rest-endpoint-methods": "^17.0.0",
-    "@octokit/plugin-retry": "^8.1.0",
-    "@octokit/plugin-throttling": "^11.0.3",
+    "@octokit/plugin-retry": "^8.1.1",
+    "@octokit/plugin-throttling": "^11.0.5",
     "chalk": "^5.6.2",
     "cross-fetch": "^4.1.0",
     "inquirer": "^14.0.2",
     "octokit": "^5.0.5",
-    "p-limit": "^7.3.0",
+    "p-limit": "^7.3.1",
     "packageurl-js": "^2.0.1",
     "semver": "^7.8.5",
     "yaml": "^2.9.0",
-    "yargs": "^18.0.0"
+    "yargs": "^18.1.0"
   },
   "devDependencies": {
     "@types/inquirer": "^9.0.9",
