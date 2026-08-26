@@ -433,7 +433,7 @@ npm run build
 
 ## 🧪 Test
 
-The repo ships with a minimal test fixture to validate end-to-end malware matching without making network calls.
+The repo ships with minimal test fixtures (`fixtures/`) that validate end-to-end malware matching and PURL search without making network calls.
 
 1. Build the project:
 
@@ -442,7 +442,13 @@ npm install
 npm run build
 ```
 
-2. Run the test harness script:
+2. Run the tests:
+
+```bash
+npm test
+```
+
+That runs the unit tests (Node's built-in test runner) plus the two fixture harness scripts. To run a single harness on its own:
 
 ```bash
 node dist/test-fixture-match.js
@@ -452,7 +458,8 @@ You should see output similar to:
 
 ```text
 Matches:
-chalk-org/chalk-repo => pkg:npm/chalk@5.6.1 matched advisory GHSA-test-chalk-561 range =5.6.1
+advanced-security/test-sbom-repo => pkg:npm/chalk@5.6.1 matched advisory GHSA-test-chalk-561 range =5.6.1
+advanced-security/test-sbom-repo => pkg:npm/chalk@5.6.1 matched advisory GHSA-test-chalk-561 range =5.6.1 on branch test
 ```
 
 Alternatively, you can exercise the CLI purely offline using the fixtures (no token required):
@@ -460,6 +467,8 @@ Alternatively, you can exercise the CLI purely offline using the fixtures (no to
 ```bash
 npm run start -- --sbom-cache fixtures/sboms --malware-cache fixtures/malware-cache --match-malware
 ```
+
+See [TESTING.md](TESTING.md) for more detail. Tests also run in CI on every push and pull request.
 
 ## 🚦 Rate Limiting
 
