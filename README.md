@@ -391,6 +391,7 @@ Then type one PURL query per line. Entering a blank line or using Ctrl+C on a bl
 | `--repo <name>` | Single repository scope in the form `owner/name` (mutually exclusive with `--enterprise`/`--org` when syncing) |
 | `--base-url <url>` | GitHub Enterprise Server REST base URL (e.g. `https://ghe.example.com/api/v3`) |
 | `--concurrency <n>` | Parallel SBOM fetches (default 5) |
+| `--exclude-archived` | Exclude archived repositories before SBOM collection |
 | `--sbom-delay <ms>` | Delay between SBOM fetch requests (default 3000) |
 | `--light-delay <ms>` | Delay between lightweight metadata requests (default 100) |
 | `--sbom-cache <dir>` | Directory to read/write per‑repo SBOM JSON; required for SBOM syncing and offline use |
