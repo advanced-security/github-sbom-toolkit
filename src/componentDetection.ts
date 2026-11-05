@@ -11,6 +11,34 @@ import path from 'path';
 import { tmpdir } from 'os';
 import { StringDecoder } from 'node:string_decoder';
 
+type PackageUrlData = {
+  Scheme: string;
+  Type: string;
+  Namespace?: string;
+  Name: string;
+  Version?: string;
+  Qualifiers?: Record<string, string>;
+};
+
+type TopLevelReferrer = {
+  packageUrl?: PackageUrlData;
+  packageUrlString?: string;
+};
+
+type DetectedComponent = {
+  component: {
+    id: string;
+    name?: string;
+    type?: string;
+    packageUrl?: PackageUrlData;
+  };
+  isDevelopmentDependency: boolean;
+  topLevelReferrers: TopLevelReferrer[];
+  locationsFoundAt: string[];
+  containerDetailIds: string[];
+  containerLayerIds: string[];
+};
+
 export default class ComponentDetection {
   public componentDetectionPath: string = process.platform === "win32" ? './component-detection.exe' : './component-detection';
   public outputPath: string;
@@ -55,7 +83,7 @@ export default class ComponentDetection {
         console.debug(`Component-detection binary already exists at ${this.componentDetectionPath}, skipping download.`);
         return;
       }
-    } catch (error) {
+    } catch {
       // File does not exist, proceed to download
     }
 
@@ -69,7 +97,7 @@ export default class ComponentDetection {
       // Write the blob to a file
       console.debug(`Writing binary to file ${this.componentDetectionPath}`);
       await fs.writeFileSync(this.componentDetectionPath, buffer, { mode: 0o755, flag: 'w' });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(error);
     }
   }
@@ -109,7 +137,7 @@ export default class ComponentDetection {
             resolve(false);
           }
         });
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error(error);
         reject(error);
       }
@@ -119,11 +147,11 @@ export default class ComponentDetection {
   public async getManifestsFromResults(file: string, path: string): Promise<Manifest[] | undefined> {
     console.debug(`Reading results from ${file}`);
     const results = await fs.readFileSync(file, 'utf8');
-    let json: any;
+    let json: { dependencyGraphs: DependencyGraphs; componentsFound: DetectedComponent[] };
     try {
-      json = JSON.parse(results);
-    } catch (err: any) {
-      throw new Error(`Failed to parse JSON results from component-detection output file "${file}": ${err instanceof Error ? err.message : String(err)}`);
+      json = JSON.parse(results) as { dependencyGraphs: DependencyGraphs; componentsFound: DetectedComponent[] };
+    } catch (err: unknown) {
+      throw new Error(`Failed to parse JSON results from component-detection output file "${file}": ${err instanceof Error ? err.message : String(err)}`, { cause: err });
     }
 
     let dependencyGraphs: DependencyGraphs = this.normalizeDependencyGraphPaths(json.dependencyGraphs, path);
@@ -131,7 +159,7 @@ export default class ComponentDetection {
     return this.processComponentsToManifests(json.componentsFound, dependencyGraphs);
   }
 
-  public processComponentsToManifests(componentsFound: any[], dependencyGraphs: DependencyGraphs): Manifest[] {
+  public processComponentsToManifests(componentsFound: DetectedComponent[], dependencyGraphs: DependencyGraphs): Manifest[] {
     // Parse the result file and add the packages to the package cache
     const packageCache = new PackageCache();
     const packages: Array<ComponentDetectionPackage> = [];
@@ -214,7 +242,7 @@ export default class ComponentDetection {
 
   private addPackagesToManifests(packages: Array<ComponentDetectionPackage>, manifests: Array<Manifest>, dependencyGraphs: DependencyGraphs): void {
     packages.forEach((pkg: ComponentDetectionPackage) => {
-      pkg.locationsFoundAt.forEach((location: any) => {
+      pkg.locationsFoundAt.forEach((location) => {
         // Use the normalized path (remove leading slash if present)
         let normalizedLocation = location.startsWith('/') ? location.substring(1) : location;
         // Unescape the path, as upstream ComponentDetection emits locationsFoundAt in URL-encoded form
@@ -255,35 +283,40 @@ export default class ComponentDetection {
     return pkg.isDevelopmentDependency ? 'development' : 'runtime'
   }
 
-  public static makePackageUrl(packageUrlJson: any): string {
+  public static makePackageUrl(packageUrlJson: unknown): string {
+    if (typeof packageUrlJson !== 'object' || packageUrlJson === null) {
+      console.debug(`Warning: Received null or undefined packageUrlJson. Unable to create package URL.`);
+      return "";
+    }
+    const packageUrl = packageUrlJson as Partial<PackageUrlData>;
     // Handle case when packageUrlJson is null or undefined
     if (
-      !packageUrlJson ||
-      typeof packageUrlJson.Scheme !== 'string' ||
-      typeof packageUrlJson.Type !== 'string' ||
-      !packageUrlJson.Scheme ||
-      !packageUrlJson.Type
+      typeof packageUrl.Scheme !== 'string' ||
+      typeof packageUrl.Type !== 'string' ||
+      typeof packageUrl.Name !== 'string' ||
+      !packageUrl.Scheme ||
+      !packageUrl.Type
     ) {
       console.debug(`Warning: Received null or undefined packageUrlJson. Unable to create package URL.`);
       return ""; // Return a blank string for unknown packages
     }
 
     try {
-      let packageUrl = `${packageUrlJson.Scheme}:${packageUrlJson.Type}/`;
-      if (packageUrlJson.Namespace) {
-        packageUrl += `${packageUrlJson.Namespace.replaceAll("@", "%40")}/`;
+      let result = `${packageUrl.Scheme}:${packageUrl.Type}/`;
+      if (packageUrl.Namespace) {
+        result += `${packageUrl.Namespace.replaceAll("@", "%40")}/`;
       }
-      packageUrl += `${packageUrlJson.Name.replaceAll("@", "%40")}`;
-      if (packageUrlJson.Version) {
-        packageUrl += `@${packageUrlJson.Version}`;
+      result += `${packageUrl.Name.replaceAll("@", "%40")}`;
+      if (packageUrl.Version) {
+        result += `@${packageUrl.Version}`;
       }
-      if (packageUrlJson.Qualifiers && Object.keys(packageUrlJson.Qualifiers).length > 0) {
-        const qualifierString = Object.entries(packageUrlJson.Qualifiers)
+      if (packageUrl.Qualifiers && Object.keys(packageUrl.Qualifiers).length > 0) {
+        const qualifierString = Object.entries(packageUrl.Qualifiers)
           .map(([key, value]) => `${key}=${value}`)
           .join("&");
-        packageUrl += `?${qualifierString}`;
+        result += `?${qualifierString}`;
       }
-      return packageUrl;
+      return result;
     } catch (error) {
       console.debug(`Error creating package URL from packageUrlJson: ${JSON.stringify(packageUrlJson, null, 2)}`);
       console.debug(`Error details: ${error}`);
@@ -325,18 +358,20 @@ export default class ComponentDetection {
       } else {
         throw new Error(`Unsupported platform: ${process.platform}`);
       }
-      latestRelease.data.assets.forEach((asset: any) => {
+      latestRelease.data.assets.forEach((asset) => {
         if (asset.name === assetName) {
           downloadURL = asset.browser_download_url;
         }
       });
 
       return downloadURL;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(error);
-      console.debug(error.message);
-      console.debug(error.stack);
-      throw new Error("Failed to download latest release");
+      if (error instanceof Error) {
+        console.debug(error.message);
+        console.debug(error.stack);
+      }
+      throw new Error("Failed to download latest release", { cause: error });
     }
   }
 
@@ -379,11 +414,6 @@ export default class ComponentDetection {
 /**
  * Type for referrer objects in topLevelReferrers array
  */
-type TopLevelReferrer = {
-  packageUrl?: any;
-  packageUrlString?: string;
-};
-
 class ComponentDetectionPackage extends Package {
   public packageUrlString: string;
 
@@ -420,8 +450,6 @@ export type DependencyGraph = {
  * The top-level dependencyGraphs object: keys are manifest file paths, values are DependencyGraph objects
  */
 export type DependencyGraphs = Record<string, DependencyGraph>;
-
-
 
 
 
