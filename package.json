@@ -13,7 +13,7 @@
     "dev": "tsx src/cli.ts",
     "lint": "eslint . --ext .ts --max-warnings=0",
     "lint:fix": "eslint . --ext .ts --fix",
-    "test": "node dist/test-fixture-match.js && node dist/test-branch-search.js"
+    "test": "node --test dist/sbomFetch.test.js && node dist/test-fixture-match.js && node dist/test-branch-search.js"
   },
   "engines": {
     "node": ">=18.0.0"

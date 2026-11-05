@@ -165,6 +165,26 @@ npm run start -- --sbom-cache sboms --purl-file queries.txt
 
 ### SBOM Caching Workflow
 
+GitHub.com (including Enterprise Managed Users) and `*.ghe.com` data-residency
+hosts use the [asynchronous SBOM API](https://docs.github.com/en/enterprise-cloud@latest/rest/dependency-graph/sboms):
+request generation, poll the returned report URL (`202` while processing), then
+download the SPDX JSON from the `302` redirect. Generation, polling and download
+share a two-minute deadline per repository. Polls wait at least one second and
+honor `Retry-After`; downloads do not receive your GitHub token. Failures are
+recorded per repository, as before, and collection continues.
+
+The [synchronous cloud endpoint is removed November 13, 2026](https://github.blog/changelog/2026-05-12-synchronous-sbom-api-deprecated/).
+There is no synchronous fallback for cloud errors. GHES retains the synchronous
+endpoint: the official [GHES 3.19](https://docs.github.com/en/enterprise-server@3.19/rest/dependency-graph/sboms)
+and [3.22](https://docs.github.com/en/enterprise-server@3.22/rest/dependency-graph/sboms)
+references document only that flow. Selection uses the normalized API base URL
+(`/api/v3` for GHES), so custom GHES URLs work even without `--ghes`.
+Existing GHES custom-CA client settings are unchanged.
+
+No cache migration is needed. The downloaded SPDX document and its packages are
+stored in the same per-repository cache shape; offline searches, incremental
+skips, and branch dependency-review behavior are unchanged.
+
 1. First collection (populates cache progressively as it runs):
 
 ```bash
