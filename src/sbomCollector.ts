@@ -337,7 +337,7 @@ export class SbomCollector {
               if (this.opts.forceSubmission) {
                 try {
                   console.debug(chalk.blue(`Force-submission enabled: submitting component snapshot for ${fullName} branch ${b.name}...`));
-                  if (await submitSnapshotIfPossible({ octokit: this.octokit, owner: org, repo: repo.name, branch: b.name, languages: this.opts.submitLanguages, quiet: this.opts.quiet, componentDetectionBinPath: this.opts.componentDetectionBinPath })) {
+                  if (await submitSnapshotIfPossible({ octokit: this.octokit!, owner: org, repo: repo.name, branch: b.name, languages: this.opts.submitLanguages, quiet: this.opts.quiet, componentDetectionBinPath: this.opts.componentDetectionBinPath })) {
                     // Brief delay to allow GitHub to ingest the submitted snapshot before attempting dependency review.
                     // This prevents race conditions where the review diff is requested before the snapshot is available.
                     await new Promise(r => setTimeout(r, this.opts.snapshotIngestionDelayMs));
@@ -428,7 +428,7 @@ export class SbomCollector {
       return orgs;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      throw new Error(`Failed to list orgs for enterprise ${enterprise}: ${msg}`);
+      throw new Error(`Failed to list orgs for enterprise ${enterprise}: ${msg}`, { cause: e });
     }
   }
 
@@ -472,7 +472,7 @@ export class SbomCollector {
       return data;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      throw new Error(`Failed to get repo metadata for ${org}/${repo}: ${msg}`);
+      throw new Error(`Failed to get repo metadata for ${org}/${repo}: ${msg}`, { cause: e });
     }
   }
 
@@ -525,7 +525,7 @@ export class SbomCollector {
         branches.push(...data);
         if (data.length < per_page) done = true; else page++;
       } catch (e) {
-        throw new Error(`Failed listing branches for ${org}/${repo}: ${(e as Error).message}`);
+        throw new Error(`Failed listing branches for ${org}/${repo}: ${(e as Error).message}`, { cause: e });
       }
     }
     return branches;

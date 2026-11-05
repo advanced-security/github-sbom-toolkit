@@ -12,6 +12,7 @@
     "start": "node dist/cli.js",
     "dev": "tsx src/cli.ts",
     "lint": "eslint . --ext .ts --max-warnings=0",
+    "lint:fix": "eslint . --ext .ts --fix",
     "test": "node dist/test-fixture-match.js && node dist/test-branch-search.js"
   },
   "engines": {
@@ -36,6 +37,7 @@
     "yargs": "^18.1.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/inquirer": "^9.0.10",
     "@types/node": "^26.1.1",
     "@types/semver": "^7.8.0",
@@ -43,7 +45,8 @@
     "@typescript-eslint/eslint-plugin": "^8.67.0",
     "@typescript-eslint/parser": "^8.48.1",
     "eslint": "^10.8.0",
+    "globals": "^17.13.0",
     "tsx": "^4.23.12",
-    "typescript": "^7.0.2"
+    "typescript": "~6.0.3"
   }
 }
