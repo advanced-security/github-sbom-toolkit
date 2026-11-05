@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import { SbomCollector } from './sbomCollector.js';
-import type { RepositorySbom } from './types.js';
 
 // This test harness validates that branch SBOMs and dependency review diffs
 // participate in search results. It constructs a synthetic repo SBOM object,

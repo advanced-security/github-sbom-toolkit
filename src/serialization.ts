@@ -1,6 +1,10 @@
 import fs from "fs";
 import path from "path";
-import { RepositorySbom } from "./types.js";
+import { BranchDependencyDiff, RepositorySbom } from "./types.js";
+
+type SerializedRepositorySbom = Omit<RepositorySbom, "branchDiffs"> & {
+  branchDiffs?: BranchDependencyDiff[];
+};
 
 export interface SerializeOptions {
   outDir: string;
@@ -49,12 +53,12 @@ export function readAll(dir: string, opts: ReadOptions = {}): RepositorySbom[] {
     try {
       const raw = fs.readFileSync(filePath, "utf8");
       const obj = reviveAfterRead(JSON.parse(raw));
-      if (obj && obj.repo && Array.isArray(obj.packages)) {
+      if (isRepositorySbom(obj)) {
         results.push(obj as RepositorySbom);
       }
     } catch (e) {
       if (logParseErrors) {
-        // eslint-disable-next-line no-console
+
         console.warn(`Skipping malformed SBOM JSON ${filePath}: ${(e as Error).message}`);
       }
     }
@@ -94,24 +98,28 @@ export function readAll(dir: string, opts: ReadOptions = {}): RepositorySbom[] {
 
 // Convert Maps to plain serializable structures before JSON.stringify
 function prepareForWrite(sbom: RepositorySbom): unknown {
-  const clone: any = { ...sbom };
-  if (clone.branchDiffs instanceof Map) {
-    // store as array of diff objects for backward compatibility
-    clone.branchDiffs = Array.from(clone.branchDiffs.values());
+  if (sbom.branchDiffs instanceof Map) {
+    return { ...sbom, branchDiffs: Array.from(sbom.branchDiffs.values()) } satisfies SerializedRepositorySbom;
   }
-  return clone;
+  return sbom;
 }
 
 // Convert array representations back into Maps after JSON.parse
-function reviveAfterRead(obj: any): any {
-  if (obj && obj.branchDiffs && Array.isArray(obj.branchDiffs)) {
-    const map = new Map<string, any>();
-    for (const diff of obj.branchDiffs) {
-      if (diff && typeof diff.head === 'string') {
-        map.set(diff.head, diff);
-      }
-    }
-    obj.branchDiffs = map;
+function reviveAfterRead(value: unknown): unknown {
+  if (typeof value !== "object" || value === null || !("branchDiffs" in value) || !Array.isArray(value.branchDiffs)) {
+    return value;
   }
-  return obj;
+  const map = new Map<string, BranchDependencyDiff>();
+  for (const diff of value.branchDiffs) {
+    if (typeof diff === "object" && diff !== null && "head" in diff && typeof diff.head === "string") {
+      map.set(diff.head, diff as BranchDependencyDiff);
+    }
+  }
+  return { ...value, branchDiffs: map };
+}
+
+function isRepositorySbom(value: unknown): value is RepositorySbom {
+  return typeof value === "object" && value !== null &&
+    "repo" in value && typeof value.repo === "string" &&
+    "packages" in value && Array.isArray(value.packages);
 }
