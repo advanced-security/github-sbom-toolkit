@@ -9,7 +9,7 @@ import {
     Job,
     Snapshot,
 } from '@github/dependency-submission-toolkit';
-import { Octokit } from 'octokit';
+import { Octokit } from '@octokit/core';
 import { RequestError } from '@octokit/request-error'
 
 export interface SubmitOpts {
