@@ -67,7 +67,7 @@ export function createOctokit({ token, baseUrl, userAgentExtra, suppressSecondar
       const caPem = fs.readFileSync(caBundlePath, "utf8");
       agent = new https.Agent({ ca: caPem });
     } catch (e) {
-      // eslint-disable-next-line no-console
+
       console.warn(`Failed to load CA bundle at ${caBundlePath}: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
