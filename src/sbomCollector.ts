@@ -18,6 +18,7 @@ export interface CollectorOptions {
   ghes?: boolean; // Is this a GHES instance?
   concurrency?: number; // parallel repo SBOM fetches
   includePrivate?: boolean;
+  excludeArchived?: boolean; // when true, skip archived repos during listing
   delayMsBetweenRepos?: number;
   lightDelayMs?: number; // delay for lightweight (non-SBOM) requests
   loadFromDir?: string; // optional pre-existing serialized SBOM directory
@@ -82,6 +83,7 @@ export class SbomCollector {
       baseUrl: o.baseUrl,
       concurrency: o.concurrency ?? 5,
       includePrivate: o.includePrivate ?? true,
+      excludeArchived: o.excludeArchived ?? false,
       delayMsBetweenRepos: o.delayMsBetweenRepos ?? 5000,
       lightDelayMs: o.lightDelayMs ?? 500,
       loadFromDir: o.loadFromDir,
@@ -171,6 +173,12 @@ export class SbomCollector {
       throw new Error("No Octokit instance; token may be missing");
     }
 
+    // Cached SBOMs are baselines for a sync, not results outside the current repository scope.
+    this.sboms = [];
+    this.summary.successCount = 0;
+    this.summary.failedCount = 0;
+    this.summary.skippedCount = 0;
+
     if (this.opts.enterprise && !this.opts.quiet) {
       process.stderr.write(chalk.blue(`Getting list of organizations for enterprise ${this.opts.enterprise}`) + "\n");
     }
@@ -179,7 +187,7 @@ export class SbomCollector {
     this.summary.orgs = orgs;
 
     // Pre-list all repos if showing progress bar so we know the total upfront
-    const orgRepoMap: Record<string, { name: string; pushed_at?: string; updated_at?: string; default_branch?: string }[]> = {};
+    const orgRepoMap: Record<string, { name: string; pushed_at?: string; updated_at?: string; default_branch?: string; archived?: boolean }[]> = {};
     let totalRepos = 0;
 
     if (!this.opts.repo) {
@@ -234,7 +242,6 @@ export class SbomCollector {
           try {
             if (new Date(repo.pushed_at) <= new Date(baseline.repoPushedAt)) {
               // repo pushed_at unchanged -> skip
-              newSboms.push(baseline);
               this.summary.skippedCount++;
               this.decisions[fullName] = `Skipping (no new pushes since last fetch)`;
               skipped = true;
@@ -252,7 +259,6 @@ export class SbomCollector {
                     const previousRetrieval = new Date(baseline.retrievedAt).getTime();
                     if (commitTime <= previousRetrieval) {
                       // Default branch head hasn't advanced since last SBOM retrieval -> skip
-                      newSboms.push(baseline);
                       this.summary.skippedCount++;
                       this.decisions[fullName] = `Skipping (default branch commit not newer than previous SBOM: ${commitDate} <= ${baseline.retrievedAt})`;
                       skipped = true;
@@ -432,10 +438,10 @@ export class SbomCollector {
     }
   }
 
-  private async listOrgRepos(org: string): Promise<{ name: string; pushed_at?: string; updated_at?: string; default_branch?: string }[]> {
+  private async listOrgRepos(org: string): Promise<{ name: string; pushed_at?: string; updated_at?: string; default_branch?: string; archived?: boolean }[]> {
     if (!this.octokit) throw new Error("No Octokit instance");
 
-    interface RepoMeta { name: string; pushed_at?: string; updated_at?: string; default_branch?: string }
+    interface RepoMeta { name: string; pushed_at?: string; updated_at?: string; default_branch?: string; archived?: boolean }
     const repos: RepoMeta[] = [];
     const per_page = 100;
     let page = 1;
@@ -446,9 +452,10 @@ export class SbomCollector {
 
         await new Promise(r => setTimeout(r, this.opts.lightDelayMs));
 
-        const items = resp.data as Array<{ name: string; pushed_at?: string; updated_at?: string; default_branch?: string }>;
+        const items = resp.data as Array<{ name: string; pushed_at?: string; updated_at?: string; default_branch?: string; archived?: boolean }>;
         for (const r of items) {
-          repos.push({ name: r.name, pushed_at: r.pushed_at, updated_at: r.updated_at, default_branch: r.default_branch });
+          if (this.opts.excludeArchived && r.archived) continue;
+          repos.push({ name: r.name, pushed_at: r.pushed_at, updated_at: r.updated_at, default_branch: r.default_branch, archived: r.archived });
         }
         if (items.length < per_page) done = true; else page++;
       } catch (e) {

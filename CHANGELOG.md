@@ -4,6 +4,7 @@
 
 Added:
 
+- Optional archived-repository filtering during SBOM collection via `--exclude-archived`; default behavior is unchanged.
 - Continuous integration: GitHub Actions workflow that restores packages, builds and tests on every push to `main` and every pull request.
 - Unit tests using Node's built-in test runner (no new dependencies) covering the shipped fixtures: SBOM and advisory cache loading, branch diffs, malware matching and the advisory date cutoff, the ignore file, PURL search, and the documented offline CLI invocations.
 - [TESTING.md](TESTING.md) documenting how to run the tests and what they cover.
