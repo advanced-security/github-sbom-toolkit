@@ -91,7 +91,7 @@ export async function fetchRepositorySbom(
     const reportUrl = new URL(data.sbom_url, apiUrl);
     const reportPrefix = `${apiUrl.pathname}/fetch-report/`;
     if (reportUrl.origin !== apiUrl.origin || reportUrl.username || reportUrl.password ||
-        !reportUrl.pathname.startsWith(reportPrefix) || !reportUrl.pathname.slice(reportPrefix.length) ||
+        !reportUrl.pathname.toLowerCase().startsWith(reportPrefix.toLowerCase()) || !reportUrl.pathname.slice(reportPrefix.length) ||
         reportUrl.pathname.slice(reportPrefix.length).includes("/")) {
       throw new Error("Invalid SBOM report URL: expected this repository's API fetch-report endpoint");
     }
