@@ -226,7 +226,8 @@ test("normalizes binary Octokit GHES responses", async t => {
 
 for (const baseUrl of ["https://github.com", "https://example.ghe.com", "https://api.example.ghe.com"]) {
   test(`${baseUrl} uses the cloud asynchronous flow`, async t => {
-    const base = baseUrl.includes("ghe.com") ? "https://api.example.ghe.com" : api;
+    const hostname = new URL(baseUrl).hostname;
+    const base = hostname === "ghe.com" || hostname.endsWith(".ghe.com") ? "https://api.example.ghe.com" : api;
     const calls = network(t, [generated(base), ready(), json(document)]);
     await fetchRepositorySbom(client(baseUrl), "example", "demo", fast);
     assert.equal(calls[0].url, `${base}/repos/example/demo/dependency-graph/sbom/generate-report`);
