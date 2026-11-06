@@ -173,6 +173,12 @@ export class SbomCollector {
       throw new Error("No Octokit instance; token may be missing");
     }
 
+    // Cached SBOMs are baselines for a sync, not results outside the current repository scope.
+    this.sboms = [];
+    this.summary.successCount = 0;
+    this.summary.failedCount = 0;
+    this.summary.skippedCount = 0;
+
     if (this.opts.enterprise && !this.opts.quiet) {
       process.stderr.write(chalk.blue(`Getting list of organizations for enterprise ${this.opts.enterprise}`) + "\n");
     }
@@ -236,7 +242,6 @@ export class SbomCollector {
           try {
             if (new Date(repo.pushed_at) <= new Date(baseline.repoPushedAt)) {
               // repo pushed_at unchanged -> skip
-              newSboms.push(baseline);
               this.summary.skippedCount++;
               this.decisions[fullName] = `Skipping (no new pushes since last fetch)`;
               skipped = true;
@@ -254,7 +259,6 @@ export class SbomCollector {
                     const previousRetrieval = new Date(baseline.retrievedAt).getTime();
                     if (commitTime <= previousRetrieval) {
                       // Default branch head hasn't advanced since last SBOM retrieval -> skip
-                      newSboms.push(baseline);
                       this.summary.skippedCount++;
                       this.decisions[fullName] = `Skipping (default branch commit not newer than previous SBOM: ${commitDate} <= ${baseline.retrievedAt})`;
                       skipped = true;

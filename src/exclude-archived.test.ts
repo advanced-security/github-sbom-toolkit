@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { after, before, describe, it } from "node:test";
 import { createServer, type Server } from "node:http";
 
 import { SbomCollector } from "./sbomCollector.js";
+import { writeOne } from "./serialization.js";
+import type { RepositorySbom } from "./types.js";
 
 const repositories = [
-  { name: "active-repo", archived: false },
-  { name: "archived-repo", archived: true }
+  { name: "active-repo", archived: false, pushed_at: "2026-01-01T00:00:00Z", default_branch: "main" },
+  { name: "archived-repo", archived: true, pushed_at: "2025-01-01T00:00:00Z", default_branch: "main" }
 ];
 let server: Server;
 let baseUrl: string;
@@ -62,6 +67,17 @@ async function collect(excludeArchived: boolean) {
   return { sboms, summary: collector.getSummary(), sbomRequests: [...sbomRequests] };
 }
 
+function makeCachedSbom(repo: string, repoPushedAt: string): RepositorySbom {
+  return {
+    repo: `example-org/${repo}`,
+    org: "example-org",
+    retrievedAt: "2026-01-01T00:00:00Z",
+    repoPushedAt,
+    defaultBranch: "main",
+    packages: []
+  };
+}
+
 describe("exclude archived repositories", () => {
   it("collects archived repositories by default", async () => {
     const result = await collect(false);
@@ -80,5 +96,38 @@ describe("exclude archived repositories", () => {
     assert.equal(result.summary.repositoryCount, 1);
     assert.deepEqual(result.sbomRequests, ["active-repo"]);
     assert.deepEqual(result.sboms.map(sbom => sbom.repo), ["example-org/active-repo"]);
+  });
+
+  it("excludes cached archived SBOMs while retaining active cached baselines", async () => {
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "sbom-toolkit-archived-"));
+    try {
+      writeOne(makeCachedSbom("active-repo", "2026-01-01T00:00:00Z"), { outDir: cacheDir });
+      writeOne(makeCachedSbom("archived-repo", "2025-01-01T00:00:00Z"), { outDir: cacheDir });
+      sbomRequests = [];
+
+      const collector = new SbomCollector({
+        token: "test-token",
+        baseUrl,
+        org: "example-org",
+        loadFromDir: cacheDir,
+        syncSboms: true,
+        quiet: true,
+        lightDelayMs: 0,
+        delayMsBetweenRepos: 0,
+        excludeArchived: true
+      });
+
+      const sboms = await collector.collect();
+      const summary = collector.getSummary();
+
+      assert.deepEqual(sboms.map(sbom => sbom.repo), ["example-org/active-repo"]);
+      assert.deepEqual(sbomRequests, []);
+      assert.equal(summary.repositoryCount, 1);
+      assert.equal(summary.successCount, 1);
+      assert.equal(summary.failedCount, 0);
+      assert.equal(summary.skippedCount, 1);
+    } finally {
+      fs.rmSync(cacheDir, { recursive: true, force: true });
+    }
   });
 });
