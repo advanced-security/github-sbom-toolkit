@@ -22,6 +22,7 @@ async function main() {
     .option("concurrency", { type: "number", default: 5 })
     .option("sbom-delay", { type: "number", default: 3000, describe: "Delay (ms) between SBOM fetch requests" })
     .option("light-delay", { type: "number", default: 100, describe: "Delay (ms) between lightweight metadata requests (org/repo listing, commit head checks)" })
+    .option("exclude-archived", { type: "boolean", default: false, describe: "Exclude archived repositories before SBOM collection" })
     .option("sbom-cache", { type: "string", describe: "Directory to read/write cached SBOM JSON files" })
     .option("purl", { type: "array", describe: "One or more PURL strings to search (supports suffix * wildcard after slash)" })
     .option("sync-sboms", { type: "boolean", default: false, describe: "Fetch SBOMs from GitHub (write to --sbom-cache if provided) instead of offline-only" })
@@ -130,6 +131,7 @@ async function main() {
     concurrency: argv.concurrency as number,
     delayMsBetweenRepos: argv["sbom-delay"] as number,
     lightDelayMs: argv["light-delay"] as number,
+    excludeArchived: argv["exclude-archived"] as boolean,
     loadFromDir: argv["sbom-cache"] as string | undefined,
     syncSboms: argv.syncSboms as boolean,
     showProgressBar: argv.progress as boolean,

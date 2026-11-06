@@ -26,6 +26,7 @@ Node's built-in test runner (`node --test`) runs the `src/*.test.ts` files, so n
 | ---- | ------ |
 | `src/fixtures.test.ts` | Loading the SBOM and malware advisory fixtures, branch diff revival, malware matching (including the advisory date cutoff), the `ignore.example.yml` ignore file, and PURL search (exact, semver range and wildcard queries) |
 | `src/cli.test.ts` | Running the built CLI offline against the fixtures, as documented in the [README](README.md): malware matching, JSON search output, and the no-match case |
+| `src/exclude-archived.test.ts` | Collecting organization SBOMs with archived repositories included by default and excluded when requested, using a local mock GitHub API |
 
 ### Fixture harness scripts
 
