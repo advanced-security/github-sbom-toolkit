@@ -59,7 +59,7 @@ export async function fetchRepositorySbom(
   const endpoint = octokit.request.endpoint("GET /repos/{owner}/{repo}/dependency-graph/sbom", { owner, repo });
   const apiUrl = new URL(endpoint.url);
   // GHES (including custom hostnames without --ghes) still documents the synchronous API.
-  if (/^\/api\/v3\//i.test(apiUrl.pathname)) {
+  if (/\/api\/v3\/repos\//i.test(apiUrl.pathname)) {
     const response = await octokit.request("GET /repos/{owner}/{repo}/dependency-graph/sbom", {
       owner, repo, headers: { Accept: "application/vnd.github+json" }
     });
