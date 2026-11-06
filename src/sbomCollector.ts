@@ -1,5 +1,6 @@
 import { createOctokit } from "./octokit.js";
-import type { RepositorySbom, CollectionSummary, SbomPackage, Sbom, BranchDependencyDiff, DependencyReviewPackageChange } from "./types.js";
+import { fetchRepositorySbom } from "./sbomFetch.js";
+import type { RepositorySbom, CollectionSummary, SbomPackage, BranchDependencyDiff, DependencyReviewPackageChange } from "./types.js";
 import * as semver from "semver";
 import { readAll, writeOne } from "./serialization.js";
 import { submitSnapshotIfPossible } from "./componentSubmission.js";
@@ -481,20 +482,19 @@ export class SbomCollector {
 
     const fullName = `${org}/${repo}`;
     try {
-      const resp = await this.octokit.request("GET /repos/{owner}/{repo}/dependency-graph/sbom", { owner: org, repo, headers: { Accept: "application/vnd.github+json" } });
-      const sbomWrapper = resp.data as { sbom?: Sbom };
-      const packages: SbomPackage[] = sbomWrapper?.sbom?.packages ?? [];
+      const { sbom, etag } = await fetchRepositorySbom(this.octokit, org, repo);
+      const packages: SbomPackage[] = sbom.packages ?? [];
       return {
         repo: fullName,
         org,
         enterprise: this.opts.enterprise,
         retrievedAt: new Date().toISOString(),
-        sbom: sbomWrapper?.sbom,
+        sbom,
         packages,
         repoPushedAt: repoMeta?.pushed_at,
         repoUpdatedAt: repoMeta?.updated_at,
         defaultBranch: repoMeta?.default_branch,
-        etag: (resp.headers as Record<string, string | undefined>)["etag"]
+        etag
       };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

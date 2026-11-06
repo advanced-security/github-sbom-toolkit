@@ -6,9 +6,8 @@ export interface SbomPackage {
   [k: string]: unknown;
 }
 
-// SPDX 2.2 style structures returned inside the `sbom` key from
-// GET /repos/{owner}/{repo}/dependency-graph/sbom
-// (GitHub provides an SPDX JSON document subset.)
+// SPDX structures downloaded by the asynchronous SBOM API, or returned
+// inside the `sbom` key by the synchronous GHES API.
 export interface SbomExternalRef {
   referenceCategory?: string;
   referenceType?: string;
