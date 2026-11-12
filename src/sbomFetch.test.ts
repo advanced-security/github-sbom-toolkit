@@ -110,6 +110,53 @@ test("bounds a stalled download", async t => {
   assert.equal(requests, 3);
 });
 
+for (const alreadyAborted of [false, true]) {
+  test(`secondary throttle wait cancels ${alreadyAborted ? "with an already-aborted signal" : "when aborted during the wait"}`, async t => {
+    const calls = network(t, [
+      new Response(JSON.stringify({ message: "You have exceeded a secondary rate limit" }), {
+        status: 403,
+        headers: { "content-type": "application/json", "retry-after": "1" }
+      }),
+      json({})
+    ]);
+    const controller = new AbortController();
+    let hit = false;
+    const octokit = createOctokit({
+      token: "test-token",
+      suppressSecondaryRateLimitLogs: true,
+      onSecondaryRateLimitHit: () => {
+        hit = true;
+        if (alreadyAborted) controller.abort();
+        else queueMicrotask(() => controller.abort());
+      }
+    });
+    const started = Date.now();
+    // Await Octokit's request itself: a surrounding Promise.race would hide a leaked throttle timer.
+    await assert.rejects(octokit.request("GET /repos/{owner}/{repo}/dependency-graph/sbom/generate-report", {
+      owner: "example", repo: "demo", request: { signal: controller.signal, retries: 0 }
+    }), /secondary rate limit/);
+    assert.ok(hit);
+    assert.ok(Date.now() - started < 1_000, "request must settle before the one-second throttle wait completes");
+    assert.equal(calls.length, 1, "an aborted request must not be retried");
+  });
+}
+
+test("secondary throttle wait still retries requests without an AbortSignal", async t => {
+  const calls = network(t, [
+    new Response(JSON.stringify({ message: "You have exceeded a secondary rate limit" }), {
+      status: 403,
+      headers: { "content-type": "application/json", "retry-after": "0.01" }
+    }),
+    generated()
+  ]);
+  const octokit = createOctokit({ token: "test-token", suppressSecondaryRateLimitLogs: true });
+  const response = await octokit.request("GET /repos/{owner}/{repo}/dependency-graph/sbom/generate-report", {
+    owner: "example", repo: "demo", request: { retries: 0 }
+  });
+  assert.equal(response.status, 201);
+  assert.equal(calls.length, 2);
+});
+
 for (const status of [403, 404, 500]) {
   test(`cloud generation HTTP ${status} is surfaced without synchronous fallback`, async t => {
     const calls = network(t, [json({ message: "generation failed" }, status)]);

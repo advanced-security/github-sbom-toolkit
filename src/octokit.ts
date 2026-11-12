@@ -6,6 +6,7 @@ import { retry } from "@octokit/plugin-retry";
 import chalk from "chalk";
 import fs from "fs";
 import https from "https";
+import { setTimeout as sleep } from "node:timers/promises";
 
 export interface OctokitFactoryOptions {
   token: string;
@@ -88,13 +89,20 @@ export function createOctokit({ token, baseUrl, userAgentExtra, suppressSecondar
         console.error(`Rate limit exceeded for ${opt.method} ${opt.url}. Not retrying.`);
         return false;
       },
-      onSecondaryRateLimit: async (retryAfter: number, _options: unknown) => {
+      onSecondaryRateLimit: async (retryAfter: number, options: { request?: { signal?: AbortSignal } }) => {
         if (!suppressSecondaryRateLimitLogs) {
           console.warn(chalk.grey(`Secondary rate limit hit. Pausing for ${retryAfter}s.`));
         }
         try { onSecondaryRateLimitHit?.(retryAfter); } catch { /* swallow callback errors */ }
-        await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
-        return true;
+        const signal = options.request?.signal;
+        try {
+          await sleep(retryAfter * 1000, undefined, { signal });
+        } catch (error) {
+          // Decline retries on cancellation without logging an expected abort as a hook failure.
+          if (signal?.aborted) return false;
+          throw error;
+        }
+        return !signal?.aborted;
       }
     }
   });
