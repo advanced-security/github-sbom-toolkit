@@ -13,8 +13,6 @@ updates:
     semver-minor-days: 14
     semver-major-days: 30
   open-pull-requests-limit: 5
-  assignees:
-    - "aegilops"
   groups:
     production-dependencies:
       dependency-type: "production"
@@ -27,5 +25,3 @@ updates:
   cooldown:
     default-days: 7
   open-pull-requests-limit: 5
-  assignees:
-    - "aegilops"
